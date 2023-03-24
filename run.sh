@@ -1,0 +1,4 @@
+python run_track.py -d 7 --data path.mp4 -v
+python run_track.py -d 7 --data path.mp4 --base ./outputs/path 
+python build_dataset.py --train ./outputs/path --test ./outputs/path
+python build_dataset.py --add_bg ~/workspace/Data/nerface_dataset/person_1/bg/00050.png
