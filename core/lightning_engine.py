@@ -157,7 +157,7 @@ class Lightning_Engine:
             vis_i = torchvision.utils.draw_keypoints(vis_i, pred_lmk_68[idx:idx+1], colors="red", radius=1.5)
             # vis_i = torchvision.utils.draw_bounding_boxes(vis_i, mini_batch['bbox'][idx:idx+1])
             # vis_image = torchvision.utils.make_grid([vis_i, mp_images[idx], frame], nrow=3)
-            vis_image = torchvision.utils.make_grid([frame, vis_i], nrow=4)
+            vis_image = torchvision.utils.make_grid([frame, images[idx], vis_i], nrow=4)
             # torchvision.utils.save_image(vis_image/255, './debug.jpg')
             vis_images.append(vis_image)
         return vis_images
