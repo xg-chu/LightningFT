@@ -16,9 +16,9 @@ class DataEngine:
         self.path_dict['lmks_path'] = os.path.join(path_dict['output_path'], 'landmarks.pth')
         self.path_dict['emoca_path'] = os.path.join(path_dict['output_path'], 'emoca_v2.pth')
         self.path_dict['camera_path'] = os.path.join(path_dict['output_path'], 'camera_params.pth')
-        self.path_dict['lightning_path'] = os.path.join(path_dict['output_path'], 'lightning.json')
-        self.path_dict['anal_by_synth_path'] = os.path.join(path_dict['output_path'], 'anal_by_synth.json')
-        self.path_dict['smoothed_path'] = os.path.join(path_dict['output_path'], 'smoothed_results.json')
+        self.path_dict['lightning_path'] = os.path.join(path_dict['output_path'], 'lightning.pth')
+        self.path_dict['anal_by_synth_path'] = os.path.join(path_dict['output_path'], 'anal_by_synth.pth')
+        self.path_dict['smoothed_path'] = os.path.join(path_dict['output_path'], 'smoothed_results.pth')
         self.path_dict['visul_path'] = os.path.join(path_dict['output_path'], 'track.mp4')
         self.path_dict['calib_path'] = os.path.join(path_dict['output_path'], 'calibration.jpg')
 
@@ -41,23 +41,24 @@ class DataEngine:
         return image
 
     def get_frames(self, frame_names, channel=3, keys=[]):
-        frames, emoca_params, gt_landmarks = [], [], []
+        fn_mapper = {
+            'emoca': self.get_emoca_params, 'landmarks': self.get_landmarks,
+            'lightning': self.get_lightning_params, 'smoothed': self.get_smoothed_params, 
+        }
+        results = {'frame_names': [], 'frames': []}
+        for k in keys:
+            results[k] = []
+
         for f in frame_names:
             frame = self.get_frame(f, channel=channel)
-            if 'annotation' in keys:
-                emo = self.get_emoca_params(f)
-                lmk = self.get_landmarks(f)
-                if emo is not None:
-                    frames.append(frame)
-                    emoca_params.append(emo)
-                    gt_landmarks.append(lmk)
-            else:
-                frames.append(frame)
-        frames = torch.utils.data.default_collate(frames)
-        if 'annotation' in keys:
-            emoca_params = torch.utils.data.default_collate(emoca_params)
-            gt_landmarks = torch.utils.data.default_collate(gt_landmarks)
-        return {'frames': frames, 'emoca': emoca_params, 'landmarks': gt_landmarks}
+            for k in keys:
+                 results[k].append(fn_mapper[k](f))
+            results['frames'].append(frame)
+            results['frame_names'].append(f)
+        results['frames'] = torch.utils.data.default_collate(results['frames'])
+        for k in keys:
+            results[k] = torch.utils.data.default_collate(results[k])
+        return results
 
     def get_landmarks(self, frame_name):
         if not hasattr(self, 'landmarks'):
@@ -68,6 +69,16 @@ class DataEngine:
         if not hasattr(self, 'emoca_params'):
             self.emoca_params = torch.load(self.path_dict['emoca_path'], map_location='cpu')
         return self.emoca_params[frame_name]
+    
+    def get_lightning_params(self, frame_name):
+        if not hasattr(self, 'lightning_params'):
+            self.lightning_params = torch.load(self.path_dict['lightning_path'], map_location='cpu')
+        return self.lightning_params[frame_name]
+
+    def get_smoothed_params(self, frame_name):
+        if not hasattr(self, 'smoothed_params'):
+            self.smoothed_params = torch.load(self.path_dict['smoothed_path'], map_location='cpu')
+        return self.smoothed_params[frame_name]
 
     def get_camera_params(self, ):
         if not hasattr(self, 'camera_params'):
@@ -87,6 +98,10 @@ class DataEngine:
         elif '.json' in self.path_dict[path_key]:
             with open(self.path_dict[path_key], "w") as f:
                 json.dump(data, f)
+        elif '.mp4' in self.path_dict[path_key]:
+            print('Writing video.....')
+            torchvision.io.write_video(self.path_dict[path_key], data, fps=30)
+            print('Done.')
 
     def build_data_lmdb(self, ):
         if not os.path.exists(self.path_dict['dataset_path']):
@@ -134,4 +149,4 @@ class DataEngine:
             frames = [key.decode() for key in all_keys]
             frames.sort(key=lambda x:int(x[2:-4]))
             self._frames = frames
-        return self._frames[:10]
+        return self._frames

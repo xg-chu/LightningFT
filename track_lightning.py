@@ -32,5 +32,5 @@ if __name__ == "__main__":
     track_engine = TrackEngine(args.data, device=target_device)
     if args.remove_buffer:
         track_engine.clear_buffer()
-    track_engine.run(save_video=args.visualization)
+    track_engine.run(visualization=args.visualization)
 
