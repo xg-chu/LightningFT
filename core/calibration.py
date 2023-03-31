@@ -83,7 +83,7 @@ def optimize_camera(emoca_params, gt_landmarks, frames, image_size=512, steps=10
 
 
 def lmk_loss(opt_lmks, target_lmks, image_size, lmk_mask=None):
-    size = torch.tensor([1 / image_size, 1 / image_size]).float()[None, None, ...]
+    size = torch.tensor([1 / image_size, 1 / image_size], device=opt_lmks.device).float()[None, None, ...]
     diff = torch.pow(opt_lmks - target_lmks, 2)
     if lmk_mask is None:
         return (diff * size).mean()

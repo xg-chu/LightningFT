@@ -5,6 +5,8 @@ import colored
 from colored import stylize
 
 def set_devices(target_device: str):
+    if target_device == 'cpu':
+        return target_device
     os.environ['CUDA_VISIBLE_DEVICES'] = target_device
     import torch
     if torch.cuda.device_count() != 1:
@@ -13,6 +15,7 @@ def set_devices(target_device: str):
                 torch.cuda.device_count()
             )
         )
+    return 'cuda'
 
 
 def read_config(path):
