@@ -110,4 +110,4 @@ class DataEngine:
             frames = [key.decode() for key in all_keys]
             frames.sort(key=lambda x:int(x[2:-4]))
             self._frames = frames
-        return self._frames
+        return self._frames[:10]

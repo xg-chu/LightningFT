@@ -23,11 +23,11 @@ if __name__ == "__main__":
     parser.add_argument('--remove_buffer', '-r', action='store_true')
     args = parser.parse_args()
     ### SET DEVICE
-    set_devices(args.device)
+    #set_devices(args.device)
     ### TRACK
     from core.core_engine import TrackEngine
-    track_engine = TrackEngine(args.data)
+    track_engine = TrackEngine(args.data, device='cpu')
     if args.remove_buffer:
         track_engine.clear_buffer()
-    track_engine.run_tracking(save_video=args.save_video)
+    track_engine.run(save_video=args.visualization)
 

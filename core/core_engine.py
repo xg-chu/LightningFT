@@ -89,7 +89,7 @@ class TrackEngine:
             frames = torch.utils.data.default_collate(frames)
             emoca_params = torch.utils.data.default_collate(emoca_params)
             gt_landmarks = torch.utils.data.default_collate(gt_landmarks)
-            camera_params, calibration_image = optimize_camera(emoca_params, gt_landmarks, frames)
+            camera_params, calibration_image = optimize_camera(emoca_params, gt_landmarks, frames, device='cpu')
             torchvision.utils.save_image(calibration_image/255.0, './debug.jpg')
             # self.data_engine.save(camera_params, 'camera_path')
         # optimize landmarks
