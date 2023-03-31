@@ -40,6 +40,25 @@ class DataEngine:
         assert image is not None, frame_name
         return image
 
+    def get_frames(self, frame_names, channel=3, keys=[]):
+        frames, emoca_params, gt_landmarks = [], [], []
+        for f in frame_names:
+            frame = self.get_frame(f, channel=channel)
+            if 'annotation' in keys:
+                emo = self.get_emoca_params(f)
+                lmk = self.get_landmarks(f)
+                if emo is not None:
+                    frames.append(frame)
+                    emoca_params.append(emo)
+                    gt_landmarks.append(lmk)
+            else:
+                frames.append(frame)
+        frames = torch.utils.data.default_collate(frames)
+        if 'annotation' in keys:
+            emoca_params = torch.utils.data.default_collate(emoca_params)
+            gt_landmarks = torch.utils.data.default_collate(gt_landmarks)
+        return {'frames': frames, 'emoca': emoca_params, 'landmarks': gt_landmarks}
+
     def get_landmarks(self, frame_name):
         if not hasattr(self, 'landmarks'):
             self.landmarks = torch.load(self.path_dict['lmks_path'], map_location='cpu')
@@ -49,6 +68,11 @@ class DataEngine:
         if not hasattr(self, 'emoca_params'):
             self.emoca_params = torch.load(self.path_dict['emoca_path'], map_location='cpu')
         return self.emoca_params[frame_name]
+
+    def get_camera_params(self, ):
+        if not hasattr(self, 'camera_params'):
+            self.camera_params = torch.load(self.path_dict['camera_path'], map_location='cpu')
+        return self.camera_params
 
     def check_path(self, path_key):
         if os.path.exists(self.path_dict[path_key]):
@@ -110,4 +134,4 @@ class DataEngine:
             frames = [key.decode() for key in all_keys]
             frames.sort(key=lambda x:int(x[2:-4]))
             self._frames = frames
-        return self._frames
+        return self._frames[:10]

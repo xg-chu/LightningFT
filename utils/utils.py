@@ -5,6 +5,7 @@ import colored
 from colored import stylize
 
 def set_devices(target_device: str):
+    print(target_device)
     if target_device == 'cpu':
         return target_device
     os.environ['CUDA_VISIBLE_DEVICES'] = target_device

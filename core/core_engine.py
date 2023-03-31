@@ -17,6 +17,7 @@ from pytorch3d.transforms import euler_angles_to_matrix, matrix_to_quaternion, q
 from .data_engine import DataEngine
 from .lmks_engine import LandmarksEngine
 from .emoca_engine import Emoca_V2_Engine
+from .lightning_engine import Lightning_Engine
 from .calibration import optimize_camera
 from utils.renderer import Mesh_Renderer, Point_Renderer
 from utils.utils import read_json, save_json
@@ -39,6 +40,7 @@ class TrackEngine:
         # lmks engine
         self.lmks_engine = LandmarksEngine(device=device, lazy_init=True)
         self.emoca_engine = Emoca_V2_Engine(device=device, lazy_init=True)
+        self.lightning_engine = Lightning_Engine(device=device, lazy_init=True)
         
 
     def run_tracking_based_on(self, tracking_target):
@@ -76,23 +78,20 @@ class TrackEngine:
             self.data_engine.save(emoca_results, 'emoca_path')
         if not self.data_engine.check_path('camera_path'):
             cali_frames = random.choices(self.data_engine.frames(), k=32)
-            frame_shape = self.data_engine.get_frame(cali_frames[0]).shape
-            frames, emoca_params, gt_landmarks = [], [], []
-            for f in cali_frames:
-                frame = self.data_engine.get_frame(f)
-                emo = self.data_engine.get_emoca_params(f)
-                lmk = self.data_engine.get_landmarks(f)
-                if emo is not None:
-                    frames.append(frame)
-                    emoca_params.append(emo)
-                    gt_landmarks.append(lmk)
-            frames = torch.utils.data.default_collate(frames)
-            emoca_params = torch.utils.data.default_collate(emoca_params)
-            gt_landmarks = torch.utils.data.default_collate(gt_landmarks)
-            camera_params, calibration_image = optimize_camera(emoca_params, gt_landmarks, frames, device=self._device)
+            batch_data = self.data_engine.get_frames(cali_frames, keys=['annotation'])
+            camera_params, calibration_image = optimize_camera(
+                batch_data['emoca'], batch_data['landmarks'], batch_data['frames'], device=self._device
+            )
             torchvision.utils.save_image(calibration_image/255.0, './debug.jpg')
-            # self.data_engine.save(camera_params, 'camera_path')
+            self.data_engine.save(camera_params, 'camera_path')
         # optimize landmarks
+        if not self.data_engine.check_path('lightning_path'):
+            lightning_results = self.run_lightning()
+            # self.data_engine.save(lightning_results, 'lightning_path')
+        
+        raise Exception
+
+
         if not os.path.exists(self.abs_results_path):
             camera_fov, calibration_result = self.calibration(landmarks, emoca_results, self._lmdb_txn)
             torchvision.utils.save_image(calibration_result, self.calibration_result_path, nrow=4)
@@ -135,87 +134,16 @@ class TrackEngine:
         print('Done.')
         return emoca_results
 
-    @staticmethod
-    def calibration(landmarks, emoca_results, lmdb_txn, device='cuda', cali_size=512):
-        def optimize_landmarks(pred_lmk, gt_lmk, init_fov, length=1000):
-            optimizer = torch.optim.Adam([
-                    {'params': [FOV], 'lr': 1.0e-2},
-                    {'params': [TRANS_XY], 'lr': 1.0e-3},
-                    # {'params': [TRANS_Z], 'lr': 2.0e-1},
-                ], lr=1.0e-5, amsgrad=False
-            )
-            best_dist, best_fov = 10000, init_fov
-            all_dists, all_fovs = [], []
-            for idx in tqdm(range(length), ncols=80, colour='#95bb72'):
-                TRANS_Z = (1 / torch.tan(FOV[None]/360*math.pi)).expand(batch_size, -1)
-                TRANS = torch.cat([TRANS_XY, TRANS_Z], dim=-1)
-                optimizer.zero_grad()
-                trans_matrix = camera.get_full_projection_transform(R=R, T=TRANS, fov=FOV)
-                points = trans_matrix.transform_points(pred_lmk*flame_scale) * 0.5 + 0.5
-                loss = torch.nn.functional.mse_loss(points[..., :2], gt_lmk[..., :2]) * 1.0e5
-                loss.backward(retain_graph=True)
-                optimizer.step()
-                if loss < best_dist:
-                    best_dist = loss.item()
-                    best_fov = FOV.item()
-                    all_dists.append(best_dist)
-                    all_fovs.append(best_fov)
-            result_fov = best_fov
-            target = np.percentile(np.array(all_dists), 0.8)
-            for i in range(len(all_dists)):
-                if all_dists[i] < target:
-                    result_fov = all_fovs[i]
-                    break
-            return result_fov, points.detach()
-        
-        flame = FLAME_MP(
-            './assets/FLAME/generic_model.pkl', 
-            './assets/FLAME/landmark_embedding.npy', 
-            './assets/FLAME/mediapipe_landmark_embedding.npz', 
-            './assets/FLAME/mediapipe_index.npy', 100, 50
-        ).to(device)
-        batch_size = 32
-        cali_frames = random.choices(list(landmarks.keys()), k=batch_size)
-        # build codes
-        shape_codes = torch.tensor([emoca_results[f]['shape'] for f in cali_frames], device=device)
-        exp_codes = torch.tensor([emoca_results[f]['exp'] for f in cali_frames], device=device)
-        pose_codes = torch.tensor([emoca_results[f]['pose'] for f in cali_frames], device=device)
-        cams = torch.tensor([emoca_results[f]['cam'] for f in cali_frames], device=device)
-        pose_codes = torch.tensor([emoca_results[f]['pose'] for f in cali_frames], device=device)
-        crop_box = torch.tensor([emoca_results[f]['crop_box'] for f in cali_frames], device=device)
-        flame_scale = torch.tensor([cams[i][0]*(crop_box[i][2]/cali_size) for i in range(cams.shape[0])]).mean()
-        # pred landmarks
-        _, _, _, pred_key_lmk, pred_all_lmk = flame(
-            shape_params=shape_codes, expression_params=exp_codes, pose_params=pose_codes
-        )
-        # gt landmarks
-        gt_all_lmk = torch.stack([landmarks[f] for f in cali_frames], dim=0).to(device).float()
-        gt_key_lmk = gt_all_lmk[:, get_mediapipe_indices()]
-        # optimization
-        # build params
-        init_fov = 20.0
-        FOV = torch.nn.Parameter(torch.tensor([init_fov], device=device), requires_grad=True)
-        R = torch.tensor([[[1.,  0.,  0.], [ 0.,  -1.,  0.], [ 0.,  0., 1.]]], device=device).repeat(batch_size, 1, 1)
-        normed_lmk = torch.einsum('nk,bmk->bmn', [R[0], pred_all_lmk * flame_scale * 0.5]) + 0.5
-        shifts = gt_all_lmk.mean(dim=1) - normed_lmk.mean(dim=1)
-        TRANS = shifts * 2 # normed_lmk += TRANS[:, None] * 0.5
-        TRANS[..., 2] = 1 / math.tan(init_fov/360*math.pi)
-        TRANS_XY = torch.nn.Parameter(TRANS[:, :2], requires_grad=True)
-        # TRANS_Z = torch.nn.Parameter(TRANS[:, 2:], requires_grad=True)
-        camera = FoVPerspectiveCameras(device=device)
-        # optimize
-        best_fov, points = optimize_landmarks(pred_key_lmk, gt_key_lmk, init_fov, length=300)
-        best_fov, points = optimize_landmarks(pred_all_lmk, gt_all_lmk, best_fov, length=50)
-        # visulization
-        vis_calibration = []
-        for idx, frame_name in enumerate(cali_frames):
-            frame = load_img(frame_name, lmdb_txn=lmdb_txn)
-            vis_i = torchvision.utils.draw_keypoints(frame.to(torch.uint8), gt_all_lmk[idx:idx+1]*512, colors="white", radius=1.5)
-            vis_i = torchvision.utils.draw_keypoints(vis_i, gt_key_lmk[idx:idx+1]*512, colors="red", radius=1.5)
-            vis_i = torchvision.utils.draw_keypoints(vis_i, points[idx:idx+1]*512, colors="green", radius=1.5)
-            vis_calibration.append(vis_i)
-        vis_calibration = torch.stack(vis_calibration[:8], dim=0)
-        return best_fov, vis_calibration/255.0
+    def run_lightning(self, ):
+        lightning_results = {}
+        camera_params = self.data_engine.get_camera_params()
+        self.lightning_engine.init_model(32, camera_params)
+        # processing
+        batch_frames = random.choices(self.data_engine.frames(), k=32)
+        batch_data = self.data_engine.get_frames(batch_frames, keys=['annotation'])
+        lightning_res = self.lightning_engine.lightning_optimize_camera(batch_data['emoca'], batch_data['landmarks'])
+
+
 
     @staticmethod
     def run_abs(landmarks, emoca_results, camera_fov, meta_info=None, device='cuda'):
@@ -223,7 +151,8 @@ class TrackEngine:
             # rotation
             flame_pose[:, 1] += math.pi
             flame_pose[:, 0] *= -1
-            rotation_matrix = euler_angles_to_matrix(flame_pose, ['X', 'Y', 'Z']).permute(0, 2, 1)
+            print(flame_pose)
+            rotation_matrix = euler_angles_to_matrix(flame_pose, 'XYZ').permute(0, 2, 1)
             # translation
             translation = rotation_matrix.new_zeros(rotation_matrix.shape[0], 3)
             translation[..., 2] = 1/np.tan(camera_fov/360*math.pi)

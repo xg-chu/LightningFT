@@ -4,6 +4,8 @@ import argparse
 sys.path.append('./')
 
 def set_devices(target_device: str):
+    if target_device == 'cpu' or target_device == 'mps':
+        return target_device 
     os.environ['CUDA_VISIBLE_DEVICES'] = target_device
     import torch
     if torch.cuda.device_count() != 1:
@@ -12,6 +14,7 @@ def set_devices(target_device: str):
                 torch.cuda.device_count()
             )
         )
+    return 'cuda'
 
 
 if __name__ == "__main__":

@@ -76,7 +76,7 @@ def optimize_camera(emoca_params, gt_landmarks, frames, image_size=512, steps=10
         visualization.append(vis_i.float())
     camera_params = {
         'focal_length': focal_length.detach().cpu()[0], 'principal_point': principal_point.detach().cpu()[0],
-        'fov': 2 * torch.arctan(1 / focal_length.detach().cpu()[0]) / math.pi * 360
+        'fov': 2 * torch.arctan(1 / focal_length.detach().cpu()[0]) / math.pi * 360, 'flame_scale': flame_scale
     }
     print(camera_params)
     return camera_params, torchvision.utils.make_grid(visualization[:8], nrow=4)
