@@ -122,7 +122,7 @@ class TrackEngine:
         anno_key = 'smoothed'
         camera_params = self.data_engine.get_camera_params()
         self.lightning_engine.init_model(camera_params, image_size=512)
-        mini_batchs = build_minibatch(self.data_engine.frames()[:1000], 64)
+        mini_batchs = build_minibatch(self.data_engine.frames()[:1600], 64)
         vis_images = []
         shape_code = self.data_engine.get_smoothed_params('meta_info')['shape_code']
         for batch_frames in tqdm(mini_batchs):

@@ -100,7 +100,7 @@ class DataEngine:
                 json.dump(data, f)
         elif '.mp4' in self.path_dict[path_key]:
             print('Writing video.....')
-            torchvision.io.write_video(self.path_dict[path_key], data, fps=30)
+            torchvision.io.write_video(self.path_dict[path_key], data, fps=24)
             print('Done.')
 
     def build_data_lmdb(self, ):
