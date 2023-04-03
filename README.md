@@ -24,6 +24,7 @@ TODO
 
 ## Usage
 Our tracker firstly tracks the expression and pose of the target head based on EMOCA v2, then optimize the camera pose based on landmarks (face_alignment and mediapipe).
+
 Please refer to the following command to run the tracker.
 ```
 python track_lightning.py --data video_path -d gpu_id -v
