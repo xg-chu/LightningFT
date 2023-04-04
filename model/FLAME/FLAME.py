@@ -221,6 +221,40 @@ class FLAME_MP(FLAME):
         return vertices, landmarks2d_68, landmarks2d_mediapipe
 
 
+class FLAME_Tex(nn.Module):
+    def __init__(self, flame_path, n_tex=140, image_size=512):
+        super(FLAME_Tex, self).__init__()
+        tex_space = np.load(
+            os.path.join(flame_path, 'FLAME2020', 'FLAME_texture.npz')
+        )
+        # FLAME texture
+        if 'tex_dir' in tex_space.files:
+            mu_key = 'mean'
+            pc_key = 'tex_dir'
+            n_pc = 200
+            scale = 1
+        # BFM to FLAME texture
+        else:
+            mu_key = 'MU'
+            pc_key = 'PC'
+            n_pc = 199
+            scale = 255.0
+        texture_mean = tex_space[mu_key].reshape(1, -1)
+        texture_basis = tex_space[pc_key].reshape(-1, n_pc)
+        texture_mean = torch.from_numpy(texture_mean).float()[None, ...] * scale
+        texture_basis = torch.from_numpy(texture_basis[:, :n_tex]).float()[None, ...] * scale
+        self.register_buffer('texture_mean', texture_mean)
+        self.register_buffer('texture_basis', texture_basis)
+        self.image_size = image_size
+
+    def forward(self, texcode):
+        texture = self.texture_mean + (self.texture_basis * texcode[:, None, :]).sum(-1)
+        texture = texture.reshape(texcode.shape[0], 512, 512, 3).permute(0, 3, 1, 2)
+        texture = torch.nn.functional.interpolate(texture, self.image_size, mode='bilinear')
+        texture = texture[:, [2, 1, 0], :, :]
+        return texture / 255.
+
+
 def to_tensor(array, dtype=torch.float32):
     if 'torch.tensor' not in str(type(array)):
         return torch.tensor(array, dtype=dtype)

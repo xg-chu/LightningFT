@@ -17,10 +17,12 @@ class DataEngine:
         self.path_dict['emoca_path'] = os.path.join(path_dict['output_path'], 'emoca_v2.pth')
         self.path_dict['camera_path'] = os.path.join(path_dict['output_path'], 'camera_params.pth')
         self.path_dict['lightning_path'] = os.path.join(path_dict['output_path'], 'lightning.pth')
-        self.path_dict['anal_by_synth_path'] = os.path.join(path_dict['output_path'], 'anal_by_synth.pth')
+        self.path_dict['texture_path'] = os.path.join(path_dict['output_path'], 'texture.pth')
+        self.path_dict['synthesis_path'] = os.path.join(path_dict['output_path'], 'synthesis.pth')
         self.path_dict['smoothed_path'] = os.path.join(path_dict['output_path'], 'smoothed_results.pth')
         self.path_dict['visul_path'] = os.path.join(path_dict['output_path'], 'track.mp4')
-        self.path_dict['calib_path'] = os.path.join(path_dict['output_path'], 'calibration.jpg')
+        self.path_dict['visul_calib_path'] = os.path.join(path_dict['output_path'], 'calibration.jpg')
+        self.path_dict['visul_texture_path'] = os.path.join(path_dict['output_path'], 'texture.jpg')
 
     def __str__(self, ):
         return pretty_dict(self.path_dict)
@@ -85,6 +87,11 @@ class DataEngine:
             self.camera_params = torch.load(self.path_dict['camera_path'], map_location='cpu')
         return self.camera_params
 
+    def get_tex_params(self, ):
+        if not hasattr(self, 'tex_params'):
+            self.tex_params = torch.load(self.path_dict['texture_path'], map_location='cpu')
+        return self.tex_params
+
     def check_path(self, path_key):
         if os.path.exists(self.path_dict[path_key]):
             print('Found {}.'.format(self.path_dict[path_key]))
@@ -92,7 +99,7 @@ class DataEngine:
         else:
             return False
 
-    def save(self, data, path_key):
+    def save(self, data, path_key, **kwargs):
         if '.pth' in self.path_dict[path_key]:
             torch.save(data, self.path_dict[path_key])
         elif '.json' in self.path_dict[path_key]:
@@ -100,8 +107,10 @@ class DataEngine:
                 json.dump(data, f)
         elif '.mp4' in self.path_dict[path_key]:
             print('Writing video.....')
-            torchvision.io.write_video(self.path_dict[path_key], data, fps=24)
+            torchvision.io.write_video(self.path_dict[path_key], data, fps=kwargs['fps'])
             print('Done.')
+        elif '.jpg' in self.path_dict[path_key]:
+            torchvision.utils.save_image(data, self.path_dict[path_key])
 
     def build_data_lmdb(self, ):
         if not os.path.exists(self.path_dict['dataset_path']):

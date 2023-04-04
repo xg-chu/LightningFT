@@ -3,7 +3,7 @@ import mediapipe
 import numpy as np
 import face_alignment
 
-class LandmarksEngine:
+class Detection_Engine:
     def __init__(self, device='cuda', lazy_init=True):
         self._device = device
         if not lazy_init:

@@ -3,20 +3,21 @@ import math
 import torch
 import numpy as np
 import torchvision
+from tqdm.rich import tqdm
 from pytorch3d.renderer import PerspectiveCameras, look_at_view_transform
 from pytorch3d.transforms import euler_angles_to_matrix, matrix_to_rotation_6d, rotation_6d_to_matrix
 
-from model.FLAME.FLAME import FLAME_MP
-from utils.renderer import Mesh_Renderer
+from utils.renderer import Texture_Renderer
+from model.FLAME.FLAME import FLAME_MP, FLAME_Tex
 
 FLAME_MODEL_PATH = './assets/FLAME'
 
-class Lightning_Engine:
+class Synthesis_Engine:
     def __init__(self, device='cuda', lazy_init=True):
         self._device = device
 
     def init_model(self, camera_params, image_size=512):
-        print('Initializing lightning models...')
+        print('Initializing synthesis models...')
         # camera params
         self.image_size = image_size
         self.flame_scale = camera_params['flame_scale']
@@ -24,8 +25,9 @@ class Lightning_Engine:
         self.principal_point = camera_params['principal_point'].to(self._device)
         # build flame
         self.flame_model = FLAME_MP(FLAME_MODEL_PATH, 100, 50).to(self._device)
-        self.mesh_render = Mesh_Renderer(
-            512, obj_filename=os.path.join(FLAME_MODEL_PATH, 'head_template_mesh.obj'), device=self._device
+        self.flame_texture = FLAME_Tex(FLAME_MODEL_PATH, image_size=512).to(self._device)
+        self.mesh_render = Texture_Renderer(
+            512, flame_path=FLAME_MODEL_PATH, device=self._device
         )
         print('Done.')
 
@@ -59,7 +61,7 @@ class Lightning_Engine:
         # optimizer
         params = [{'params': [camera_R, camera_T], 'lr': 0.05}]
         optimizer = torch.optim.Adam(params)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=steps, gamma=0.3)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=300, gamma=0.1)
         for k in range(steps):
             points_68 = self.cameras.transform_points_screen(
                 pred_lmks_68, R=rotation_6d_to_matrix(camera_R), T=camera_T
@@ -81,49 +83,96 @@ class Lightning_Engine:
             loss = all_loss.item()
         return rotation_6d_to_matrix(camera_R).detach(), camera_T.detach()
 
-    def lightning_optimize_camera(self, frame_names, emoca_params, landmarks, frames=None):
+    def optimize_texture(self, frames, lightning_params, steps=1000):
         # build camera
-        cameras_kwargs = self._build_cameras_kwars(len(frame_names))
-        self.cameras = PerspectiveCameras(**cameras_kwargs)
-        # params
-        landmarks['lmks'] = landmarks['lmks'].to(self._device).float()
-        landmarks['lmks_dense'] = landmarks['lmks_dense'].to(self._device).float()
-        emoca_params['exp'] = emoca_params['exp'].to(self._device).float()
-        emoca_params['pose'] = emoca_params['pose'].to(self._device).float()
-        flame_shape = emoca_params['shape'].float().to(self._device)
-        flame_exp = emoca_params['exp'].float().to(self._device)
-        flame_pose = emoca_params['pose'].clone().float().to(self._device)
+        cameras_kwargs = self._build_cameras_kwars(frames.shape[0])
+        transform_matrix = lightning_params['transform_matrix'].float().to(self._device)
+        rotation, translation = transform_matrix[:, :3, :3], transform_matrix[..., :3, 3]
+        cameras = PerspectiveCameras(R=rotation, T=translation, **cameras_kwargs)
+        # flame params
+        flame_shape = lightning_params['shape'].float().to(self._device)
+        flame_exp = lightning_params['expression'].float().to(self._device)
+        flame_pose = lightning_params['flame_pose'].clone().float().to(self._device)
         flame_pose[..., :3] *= 0
-        # run
+        flame_verts, _, _ = self.flame_model(
+            shape_params=flame_shape, expression_params=flame_exp, pose_params=flame_pose
+        )
+        flame_verts = flame_verts * self.flame_scale
+        frames = frames.to(self._device) / 255.0
+        # optimize
+        texture_params = torch.nn.Parameter(torch.rand(1, 140).to(self._device))
+        light_params = torch.nn.Parameter(torch.rand(1, 9, 3).to(self._device))
+        params = [
+            {'params': [texture_params], 'lr': 0.005, 'name': ['tex']},
+            {'params': [light_params], 'lr': 0.01, 'name': ['sh']},
+        ]
+        optimizer = torch.optim.Adam(params)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=steps, gamma=0.1)
+        tqdm_queue = tqdm(range(steps), desc='', leave=True, miniters=10)
+        for k in tqdm_queue:
+            albedos = self.flame_texture(texture_params)
+            pred_images, mask_all, mask_face = self.mesh_render(flame_verts, albedos, light_params, cameras)
+            losses = {}
+            losses['face'] = pixel_loss(pred_images, frames, mask=mask_face) * 350
+            losses['head'] = pixel_loss(pred_images, frames, mask=mask_all) * 350
+            all_loss = losses['face'] + losses['head']
+            optimizer.zero_grad()
+            all_loss.backward()
+            optimizer.step()
+            scheduler.step()
+            loss = all_loss.item()
+            tqdm_queue.set_description(f'Loss for tex {loss:.4f}')
+        results = {
+            'texture_params': texture_params.detach().cpu(), 'light_params': light_params.detach().cpu(), 
+        }
+        return results, torch.cat([frames[:4], pred_images[:4]]).cpu()
+
+    def synthesis_optimize(self, frame_names, frames, lightning_params, landmarks, steps=500):
+        # build params
+        cameras_kwargs = self._build_cameras_kwars(frames.shape[0])
+        texture_params = torch.nn.Parameter(lightning_params['texture'].to(self._device), requires_grad=False)
+        light_params = torch.nn.Parameter(lightning_params['light'].to(self._device), requires_grad=False)
+        transform_matrix = lightning_params['transform_matrix'].float().to(self._device)
+        rotation, translation = transform_matrix[:, :3, :3], transform_matrix[..., :3, 3]
+        rotation = torch.nn.Parameter(matrix_to_rotation_6d(rotation))
+        translation = torch.nn.Parameter(translation)
+        params = [
+            # {'params': [texture_params], 'lr': 0.005, 'name': ['tex']},
+            # {'params': [light_params], 'lr': 0.01, 'name': ['sh']},
+            {'params': [rotation], 'lr': 0.005, 'name': ['r']},
+            {'params': [translation], 'lr': 0.005, 'name': ['t']},
+        ]
+        # flame params
+        flame_shape = lightning_params['shape'].float().to(self._device)
+        flame_exp = lightning_params['expression'].float().to(self._device)
+        flame_pose = lightning_params['flame_pose'].clone().float().to(self._device)
+        flame_pose[..., :3] *= 0
         flame_verts, pred_lmk_68, pred_lmk_dense = self.flame_model(
             shape_params=flame_shape, expression_params=flame_exp, pose_params=flame_pose
         )
         flame_verts = flame_verts * self.flame_scale
-        pred_lmk_68, pred_lmk_dense = pred_lmk_68 * self.flame_scale, pred_lmk_dense * self.flame_scale
-        # get params
-        rotation, translation = self.flame_to_camera(emoca_params['pose'], pred_lmk_68, landmarks['lmks'])
-        # optimize
-        rotation, translation = self.optimize_camera(
-            rotation, translation, 
-            pred_lmk_68, pred_lmk_dense, landmarks['lmks'], landmarks['lmks_dense']
-        )
-        # gather results
-        lightning_results = {}
-        transform_matrix = torch.cat([rotation, translation[:, :, None]], dim=-1)
-        for idx, name in enumerate(frame_names):
-            lightning_results[name] = {
-                'flame_pose': emoca_params['pose'][idx].half().cpu(),
-                'expression': emoca_params['exp'][idx].half().cpu(),
-                'bbox': emoca_params['crop_box'][idx].half().cpu(),
-                'transform_matrix': transform_matrix[idx].half().cpu()
-            }
-        # ### DEBUG
-        # cameras_kwargs = self._build_cameras_kwars(len(frame_names))
-        # images, _ = self.mesh_render(flame_verts, PerspectiveCameras(R=rotation, T=translation, **cameras_kwargs))
-        # images = images * 0.5 + frames.to(self._device) * 0.5
-        # torchvision.utils.save_image(images.cpu()[:8]/255, './debug.jpg', nrow=4)
-        # raise Exception
-        return lightning_results
+        # pred_lmk_68, pred_lmk_dense = pred_lmk_68 * self.flame_scale, pred_lmk_dense * self.flame_scale
+        frames = frames.to(self._device) / 255.0
+        
+        optimizer = torch.optim.Adam(params)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=steps, gamma=0.1)
+        for idx in range(steps):
+            self.cameras = PerspectiveCameras(R=rotation_6d_to_matrix(rotation), T=translation, **cameras_kwargs)
+            albedos = self.flame_texture(texture_params)
+            pred_images, mask_all, mask_face = self.mesh_render(flame_verts, albedos, light_params, self.cameras)
+            losses = {}
+            losses['face'] = pixel_loss(pred_images, frames, mask=mask_face) * 350
+            losses['head'] = pixel_loss(pred_images, frames, mask=mask_all) * 350
+            all_loss = losses['face'] + losses['head']
+            optimizer.zero_grad()
+            all_loss.backward(retain_graph=True)
+            optimizer.step()
+            scheduler.step()
+            loss = all_loss.item()
+            # print(rotation[0], translation[0])
+            print(idx, loss)
+
+        return synthesis_results
 
     def render(self, frames, lightning_params, shape_code):
         # flame
@@ -170,3 +219,11 @@ def lmk_loss(opt_lmks, target_lmks, image_size, lmk_mask=None):
         return (diff * size).mean()
     else:
         return (diff * size * lmk_mask).mean()
+
+def pixel_loss(opt_img, target_img, mask=None):
+    if mask is None:
+        mask = torch.ones_like(opt_img).type_as(opt_img)
+    n_pixels = torch.sum((mask[:, 0, ...] > 0).int()).detach().float()
+    loss = (mask * (opt_img - target_img)).abs()
+    loss = torch.sum(loss) / n_pixels
+    return loss

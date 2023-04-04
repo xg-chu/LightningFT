@@ -22,15 +22,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--data')
     parser.add_argument("--device", '-d', default='cpu')
+    parser.add_argument('--synthesis', action='store_true')
+    parser.add_argument('--wo_smooth', action='store_true')
     parser.add_argument('--visualization', '-v', action='store_true')
+    parser.add_argument('--visualization_fps', default=24, type=int)
     parser.add_argument('--remove_buffer', '-r', action='store_true')
     args = parser.parse_args()
     ### SET DEVICE
     target_device = set_devices(args.device)
     ### TRACK
     from core.core_engine import TrackEngine
-    track_engine = TrackEngine(args.data, device=target_device)
+    track_engine = TrackEngine(args, device=target_device)
     if args.remove_buffer:
         track_engine.clear_buffer()
-    track_engine.run(visualization=args.visualization)
+    track_engine.run()
 

@@ -41,7 +41,7 @@ def optimize_camera(emoca_params, gt_landmarks, frames, image_size=512, steps=10
     # optimizer
     params = [{'params': [camera_R, camera_T, focal_length, principal_point], 'lr': 0.05}]
     optimizer = torch.optim.Adam(params)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=300, gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=steps, gamma=0.1)
 
     tqdm_queue = tqdm(range(steps), desc='', leave=True, miniters=100)
     for k in tqdm_queue:

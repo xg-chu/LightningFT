@@ -17,9 +17,10 @@ from pytorch3d.transforms import matrix_to_rotation_6d, rotation_6d_to_matrix
 
 from .data_engine import DataEngine
 from .calibration import optimize_camera
-from .lmks_engine import LandmarksEngine
+from .detection_engine import Detection_Engine
 from .emoca_engine import Emoca_V2_Engine
 from .lightning_engine import Lightning_Engine
+from .synthesis_engine import Synthesis_Engine
 # from utils.renderer import Mesh_Renderer, Point_Renderer
 # from utils.utils import read_json, save_json
 # from model.FLAME.FLAME import FLAME_MP
@@ -28,22 +29,25 @@ from .lightning_engine import Lightning_Engine
 EMOCA_CKPT_PATH = './assets/EMOCA/EMOCA_v2_lr_mse_20/detail/checkpoints/deca-epoch=10-val_loss/dataloader_idx_0=3.25521111.ckpt'
 
 class TrackEngine:
-    def __init__(self, data_path, device='cuda'):
+    def __init__(self, args_config, device='cuda'):
         self._debug = False
         self._device = device
+        self._args_config = args_config
         # paths and data engine
         path_dict = {
-            'video_path': data_path, 'data_name': os.path.splitext(os.path.basename(data_path))[0],
-            'output_path': os.path.join('outputs', os.path.splitext(os.path.basename(data_path))[0]),
+            'video_path': self._args_config.data, 
+            'data_name': os.path.splitext(os.path.basename(self._args_config.data))[0],
+            'output_path': os.path.join('outputs', os.path.splitext(os.path.basename(self._args_config.data))[0]),
         }
         self.data_engine = DataEngine(path_dict=path_dict)
         self.data_engine.build_data_lmdb()
         # lmks engine
-        self.lmks_engine = LandmarksEngine(device=device, lazy_init=True)
+        self.lmks_engine = Detection_Engine(device=device, lazy_init=True)
         self.emoca_engine = Emoca_V2_Engine(device=device, lazy_init=True)
         self.lightning_engine = Lightning_Engine(device=device, lazy_init=True)
+        self.synthesis_engine = Synthesis_Engine(device=device, lazy_init=True)
 
-    def run(self, visualization=True):
+    def run(self, ):
         # landmarks
         if not self.data_engine.check_path('lmks_path'):
             landmarks = self.run_landmarks()
@@ -58,20 +62,24 @@ class TrackEngine:
             camera_params, calibration_image = optimize_camera(
                 batch_data['emoca'], batch_data['landmarks'], batch_data['frames'], device=self._device
             )
-            torchvision.utils.save_image(calibration_image/255.0, './debug.jpg')
             self.data_engine.save(camera_params, 'camera_path')
+            self.data_engine.save(calibration_image/255.0, 'visul_calib_path')
         # optimize landmarks
         if not self.data_engine.check_path('lightning_path'):
             lightning_results = self.run_lightning()
             self.data_engine.save(lightning_results, 'lightning_path')
+        # synthesis optimization
+        if self._args_config.synthesis and not self.data_engine.check_path('synthesis_path'):
+            synthesis_results = self.run_synthesis()
+            raise Exception
         # smoothed landmarks
-        if not self.data_engine.check_path('smoothed_path'):
+        if not self.data_engine.check_path('smoothed_path') and not self._args_config.wo_smooth:
             smoothed_results = self.run_smoothing()
             self.data_engine.save(smoothed_results, 'smoothed_path')
         # save video
-        if visualization:
+        if self._args_config.visualization:
             render_images = self.render_video()
-            self.data_engine.save(render_images, 'visul_path')
+            self.data_engine.save(render_images, 'visul_path', fps=self._args_config.visualization_fps)
 
     def run_landmarks(self, ):
         all_landmarks = {}
@@ -115,6 +123,41 @@ class TrackEngine:
         lightning_results['meta_info']['shape_code'] = self.data_engine.get_emoca_params('shape_code')
         print('Done.')
         return lightning_results
+
+    def run_synthesis(self, ):
+        synthesis_results = {}
+        camera_params = self.data_engine.get_camera_params()
+        self.synthesis_engine.init_model(camera_params, image_size=512)
+        if not self.data_engine.check_path('texture_path'):
+            # optimize texture
+            print('optimizing texture...')
+            random_frames = random.choices(self.data_engine.frames(), k=32)
+            batch_data = self.data_engine.get_frames(random_frames, keys=['lightning'])
+            batch_data['lightning']['shape'] = self.data_engine.get_emoca_params('shape_code')[None].repeat(len(random_frames), 1)
+            tex_params, tex_image = self.synthesis_engine.optimize_texture(
+                batch_data['frames'], batch_data['lightning'] 
+            )
+            self.data_engine.save(tex_params, 'texture_path')
+            self.data_engine.save(tex_image, 'visul_texture_path')
+            print('Done.')
+        else:
+            tex_params = self.data_engine.get_tex_params()
+
+        mini_batchs = build_minibatch(self.data_engine.frames(), 64)
+        print('Synthesis tracking...')
+        for batch_frames in tqdm(mini_batchs):
+            batch_data = self.data_engine.get_frames(batch_frames, keys=['lightning', 'landmarks'])
+            batch_data['lightning']['light'] = tex_params['light_params'].clone()
+            batch_data['lightning']['texture'] = tex_params['texture_params'].clone()
+            batch_data['lightning']['shape'] = self.data_engine.get_emoca_params('shape_code')[None].repeat(len(batch_frames), 1)
+            synthesis_res = self.synthesis_engine.synthesis_optimize(
+                batch_data['frame_names'], batch_data['frames'], batch_data['lightning'], batch_data['landmarks'], 
+            )
+            synthesis_results.update(synthesis_res)
+        synthesis_results['meta_info'] = camera_params
+        synthesis_results['meta_info']['shape_code'] = self.data_engine.get_emoca_params('shape_code')
+        print('Done.')
+        return synthesis_results
 
     def render_video(self, ):
         from pytorch3d.renderer import look_at_view_transform
