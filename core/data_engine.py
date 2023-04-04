@@ -110,7 +110,7 @@ class DataEngine:
             torchvision.io.write_video(self.path_dict[path_key], data, fps=kwargs['fps'])
             print('Done.')
         elif '.jpg' in self.path_dict[path_key]:
-            torchvision.utils.save_image(data, self.path_dict[path_key])
+            torchvision.utils.save_image(data, self.path_dict[path_key], nrow=4)
 
     def build_data_lmdb(self, ):
         if not os.path.exists(self.path_dict['dataset_path']):

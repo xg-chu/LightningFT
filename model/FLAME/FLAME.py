@@ -246,6 +246,10 @@ class FLAME_Tex(nn.Module):
         self.register_buffer('texture_mean', texture_mean)
         self.register_buffer('texture_basis', texture_basis)
         self.image_size = image_size
+        # MASK
+        with open(os.path.join(flame_path, 'FLAME2020', 'FLAME_masks.pkl'), 'rb') as f:
+            ss = pickle.load(f, encoding='latin1')
+            self.masks = Struct(**ss)
 
     def forward(self, texcode):
         texture = self.texture_mean + (self.texture_basis * texcode[:, None, :]).sum(-1)
