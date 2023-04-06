@@ -44,6 +44,7 @@ class Mesh_Renderer(nn.Module):
 
 class Point_Renderer(nn.Module):
     def __init__(self, image_size=256, device='cpu'):
+        super(Point_Renderer, self).__init__()
         self.device = device
         R, T = look_at_view_transform(4, 30, 30) # d, e, a
         self.cameras = FoVPerspectiveCameras(device=device, R=R, T=T, znear=0.01, zfar=1.0)
@@ -53,7 +54,7 @@ class Point_Renderer(nn.Module):
         rasterizer = PointsRasterizer(cameras=self.cameras, raster_settings=raster_settings)
         self.renderer = PointsRenderer(rasterizer=rasterizer, compositor=AlphaCompositor())
         
-    def render(self, points, D=3, E=15, A=30, coords=True, ex_points=None):
+    def forward(self, points, D=3, E=15, A=30, coords=True, ex_points=None):
         if D !=8 or E != 30 or A != 30:
             R, T = look_at_view_transform(D, E, A) # d, e, a
             self.cameras = FoVPerspectiveCameras(device=self.device, R=R, T=T, znear=0.01, zfar=1.0)

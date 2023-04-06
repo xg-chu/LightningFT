@@ -82,23 +82,16 @@ class Synthesis_Engine:
         batch_data['lightning']['flame_pose'][..., :3] *= 0
         batch_data['frames'] = batch_data['frames'] / 255.0
         cameras_kwargs = self._build_cameras_kwargs(batch_size)
-        # build flame params
-        # flame params
-        flame_verts, pred_lmk_68, pred_lmk_dense = self.flame_model(
-            shape_params=batch_data['shape_code'][None].expand(batch_size, -1), 
-            expression_params=batch_data['lightning']['expression'],
-            pose_params=batch_data['lightning']['flame_pose']
-        )
-        flame_verts = flame_verts * self.flame_scale
-        # pred_lmk_68, pred_lmk_dense = pred_lmk_68 * self.flame_scale, pred_lmk_dense * self.flame_scale
         # build params
         transform_matrix = batch_data['lightning']['transform_matrix']
         rotation, translation = transform_matrix[:, :3, :3], transform_matrix[..., :3, 3]
         translation = torch.nn.Parameter(translation)
         rotation = torch.nn.Parameter(matrix_to_rotation_6d(rotation))
         texture_params = torch.nn.Parameter(batch_data['texture_code'])
+        expression_codes = torch.nn.Parameter(batch_data['lightning']['expression'])
         params = [
             # {'params': [texture_params], 'lr': 0.005, 'name': ['tex']},
+            {'params': [expression_codes], 'lr': 0.01, 'name': ['exp']},
             {'params': [rotation], 'lr': 0.005, 'name': ['r']},
             {'params': [translation], 'lr': 0.005, 'name': ['t']},
         ]
@@ -106,14 +99,32 @@ class Synthesis_Engine:
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=steps, gamma=0.1)
         # run        
         for idx in range(steps):
-            self.cameras = PerspectiveCameras(
+            # build flame params
+            # flame params
+            flame_verts, pred_lmk_68, pred_lmk_dense = self.flame_model(
+                shape_params=batch_data['shape_code'][None].expand(batch_size, -1), 
+                expression_params=expression_codes,
+                pose_params=batch_data['lightning']['flame_pose']
+            )
+            flame_verts = flame_verts * self.flame_scale
+            pred_lmk_68, pred_lmk_dense = pred_lmk_68 * self.flame_scale, pred_lmk_dense * self.flame_scale
+
+            cameras = PerspectiveCameras(
                 R=rotation_6d_to_matrix(rotation), T=translation, **cameras_kwargs
             )
+            # synthesis
             albedos = self.flame_texture(texture_params)
-            pred_images, mask_all, mask_face = self.mesh_render(flame_verts, albedos, self.cameras)
+            pred_images, mask_all, mask_face = self.mesh_render(flame_verts, albedos, cameras)
             loss_face = pixel_loss(pred_images, batch_data['frames'], mask=mask_face)
             loss_head = pixel_loss(pred_images, batch_data['frames'], mask=mask_all)
             all_loss = (loss_face + loss_head) * 350
+            # lmks
+            points_68 = cameras.transform_points_screen(pred_lmk_68, R=rotation_6d_to_matrix(rotation), T=translation)[..., :2]
+            points_dense = cameras.transform_points_screen(pred_lmk_dense, R=rotation_6d_to_matrix(rotation), T=translation)[..., :2]
+            loss_lmk_68 = lmk_loss(points_68, batch_data['lmks']['lmks'], self.image_size)
+            loss_lmk_dense = lmk_loss(points_dense, batch_data['lmks']['lmks_dense'][:, self.flame_model.mediapipe_idx], self.image_size)
+            all_loss = all_loss + (loss_lmk_68 + loss_lmk_dense) * 300
+
             optimizer.zero_grad()
             all_loss.backward()
             optimizer.step()
@@ -133,9 +144,9 @@ class Synthesis_Engine:
         
         for idx, name in enumerate(batch_data['frame_names']):
             synthesis_results[name] = {
-                'flame_pose': batch_data['lightning']['flame_pose'][idx].half().cpu(),
-                'expression': batch_data['lightning']['expression'][idx].half().cpu(),
                 'bbox': batch_data['lightning']['bbox'][idx].half().cpu(),
+                'flame_pose': batch_data['lightning']['flame_pose'][idx].half().cpu(),
+                'expression': expression_codes[idx].half().cpu(),
                 'transform_matrix': transform_matrix[idx].half().cpu()
             }
         return synthesis_results

@@ -6,7 +6,7 @@ from pytorch3d.renderer import PerspectiveCameras, look_at_view_transform
 from pytorch3d.transforms import matrix_to_rotation_6d, rotation_6d_to_matrix
 
 from model.FLAME.FLAME import FLAME_MP, FLAME_Tex
-from utils.renderer import Mesh_Renderer, Texture_Renderer
+from utils.renderer import Mesh_Renderer, Texture_Renderer, Point_Renderer
 
 class Render_Engine(torch.nn.Module):
     def __init__(self, camera_params, flame_model_path, image_size=512, with_texture=False, device='cuda'):
@@ -21,12 +21,13 @@ class Render_Engine(torch.nn.Module):
         # build model
         self._with_texture = with_texture
         self.flame_model = FLAME_MP(flame_model_path, 100, 50).to(self._device)
+        self.point_render = Point_Renderer(image_size=image_size, device=self._device)
         if not with_texture:
             self.mesh_render = Mesh_Renderer(
                 512, obj_filename=os.path.join(flame_model_path, 'head_template_mesh.obj'), device=self._device
             )
         else:
-            self.flame_texture = FLAME_Tex(flame_model_path, image_size=512).to(self._device)
+            self.flame_texture = FLAME_Tex(flame_model_path, image_size=image_size).to(self._device)
             self.mesh_render = Texture_Renderer(
                 512, flame_path=flame_model_path, flame_mask=None, device=self._device
             )
@@ -59,6 +60,7 @@ class Render_Engine(torch.nn.Module):
         flame_verts = flame_verts * self.flame_scale
         pred_lmk_68, pred_lmk_dense = pred_lmk_68 * self.flame_scale, pred_lmk_dense * self.flame_scale
         # render
+        points_image = self.point_render(torch.cat([pred_lmk_68, pred_lmk_dense], dim=1))
         if self._with_texture:
             if not hasattr(self, 'albedos'):
                 self.albedos = self.flame_texture(batch_data['texture_code'])
@@ -76,6 +78,6 @@ class Render_Engine(torch.nn.Module):
             # vis_i = torchvision.utils.draw_keypoints(vis_i.to(torch.uint8), pred_lmk_dense[idx:idx+1], colors="white", radius=1.5)
             # vis_i = torchvision.utils.draw_keypoints(vis_i.to(torch.uint8), pred_lmk_68[idx:idx+1], colors="white", radius=1.5)
             # vis_i = torchvision.utils.draw_bounding_boxes(vis_i, batch_data[anno_key]['bbox'][idx:idx+1])
-            vis_image = torchvision.utils.make_grid([frame, images[idx], vis_i], nrow=4)
+            vis_image = torchvision.utils.make_grid([frame, images[idx], points_image[idx], vis_i], nrow=4)
             vis_images.append(vis_image)
         return vis_images

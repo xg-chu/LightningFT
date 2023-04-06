@@ -67,7 +67,7 @@ class Lightning_Engine:
         )
         translation = torch.nn.Parameter(translation)
         rotation = torch.nn.Parameter(matrix_to_rotation_6d(rotation))
-        params = [{'params': [rotation, translation], 'lr': 0.01}]
+        params = [{'params': [rotation, translation], 'lr': 0.02}]
         optimizer = torch.optim.Adam(params)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=steps, gamma=0.1)
         # run

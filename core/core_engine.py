@@ -71,7 +71,8 @@ class TrackEngine:
             self.data_engine.save(smoothed_results, 'smoothed_path')
         # save video
         if self._args_config.visualization:
-            render_images = self.render_video(anno_key='synthesis' if self._args_config.synthesis else 'lightning')
+            # render_images = self.render_video(anno_key='synthesis' if self._args_config.synthesis else 'lightning')
+            render_images = self.render_video(anno_key='smoothed')
             self.data_engine.save(render_images, 'visul_path', fps=self._args_config.visualization_fps)
 
     def run_landmarks(self, ):
@@ -105,11 +106,10 @@ class TrackEngine:
         self.lightning_engine.init_model(camera_params, image_size=512)
         mini_batchs = build_minibatch(self.data_engine.frames(), 128)
         print('Lightning tracking...')
-        smooth_params = {'R': None, 'T': None}
         for batch_frames in tqdm(mini_batchs, ncols=120, colour='#95bb72'):
             batch_data = self.data_engine.get_frames(batch_frames, keys=['emoca', 'lmks'], device=self._device)
             batch_data['shape_code'] = self.data_engine.get_data('emoca_path', query_name='shape_code', device=self._device)
-            lightning_res, smooth_params = self.lightning_engine.lightning_optimize(batch_data)
+            lightning_res = self.lightning_engine.lightning_optimize(batch_data)
             lightning_results.update(lightning_res)
         lightning_results['meta_info'] = camera_params
         lightning_results['meta_info']['shape_code'] = self.data_engine.get_data('emoca_path', query_name='shape_code').half()
@@ -148,7 +148,7 @@ class TrackEngine:
         return synthesis_results
 
     def render_video(self, anno_key='synthesis'):
-        with_texture = anno_key=='synthesis'
+        with_texture = self._args_config.synthesis
         print('Rendering...')
         camera_params = self.data_engine.get_data('camera_path', device=self._device)
         render_engine = Render_Engine(camera_params, FLAME_MODEL_PATH, with_texture=with_texture, device=self._device)
@@ -160,7 +160,8 @@ class TrackEngine:
                 batch_data['texture_code'] = self.data_engine.get_data('texture_path', query_name='texture_params', device=self._device)
             batch_data['shape_code'] = self.data_engine.get_data('emoca_path', query_name='shape_code', device=self._device)
             vis_images += render_engine(batch_data, anno_key)
-        vis_images = torch.stack(vis_images, dim=0).permute(0, 2, 3, 1).to(torch.uint8).cpu()
+        vis_images = [i.to(torch.uint8).cpu() for i in vis_images]
+        vis_images = torch.stack(vis_images, dim=0).permute(0, 2, 3, 1)
         print('Done.')
         return vis_images
 
@@ -176,20 +177,22 @@ class TrackEngine:
             smoothed_results = {}
             bboxes, quaternions, translations = [], [], []
             for frame_name in self.data_engine.frames():
-                smoothed_results[frame_name] = self.data_engine.get_data(anno_key, query_name=frame_name)
-                transform_matrix = smoothed_results[frame_name]['transform_matrix']
+                smoothed_results[frame_name] = self.data_engine.get_data(anno_key+'_path', query_name=frame_name)
+                transform_matrix = smoothed_results[frame_name]['transform_matrix'].detach()
                 bboxes.append(smoothed_results[frame_name]['bbox'].numpy())
                 quaternions.append(matrix_to_rotation_6d(transform_matrix[:3, :3]).numpy())
                 translations.append(transform_matrix[:3, 3].numpy())
             bboxes = smooth_params(np.array(bboxes))
             quaternions = smooth_params(np.array(quaternions))
+            quaternions = smooth_params(np.array(quaternions))
+            translations = smooth_params(np.array(translations))
             translations = smooth_params(np.array(translations))
             for idx, frame_name in enumerate(self.data_engine.frames()):
-                smoothed_results[frame_name]['bbox'] = bboxes[idx]
+                smoothed_results[frame_name]['bbox'] = torch.tensor(bboxes[idx])
                 rotation = rotation_6d_to_matrix(torch.tensor(quaternions[idx]))
                 affine_matrix = torch.cat([rotation, torch.tensor(translations[idx])[:, None]], dim=-1).half().cpu()
                 smoothed_results[frame_name]['transform_matrix'] = affine_matrix
-            smoothed_results['meta_info'] = self.data_engine.get_lightning_params('meta_info')
+            smoothed_results['meta_info'] = self.data_engine.get_data(anno_key+'_path', query_name=frame_name)
             print('Done')
         return smoothed_results
 
