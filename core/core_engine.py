@@ -141,18 +141,19 @@ class TrackEngine:
             self.data_engine.save(tex_image, 'visul_texture_path')
             print('Done.')
         else:
-            tex_params = self.data_engine.get_tex_params()
+            tex_params = self.data_engine.get_data('texture_path', device=self._device)
 
         mini_batchs = build_minibatch(self.data_engine.frames(), 64)
         print('Synthesis tracking...')
         for batch_frames in tqdm(mini_batchs):
-            batch_data = self.data_engine.get_frames(batch_frames, keys=['lightning', 'landmarks'])
-            batch_data['lightning']['light'] = tex_params['light_params'].clone()
-            batch_data['lightning']['texture'] = tex_params['texture_params'].clone()
-            batch_data['lightning']['shape'] = self.data_engine.get_emoca_params('shape_code')[None].repeat(len(batch_frames), 1)
-            synthesis_res = self.synthesis_engine.synthesis_optimize(
-                batch_data['frame_names'], batch_data['frames'], batch_data['lightning'], batch_data['landmarks'], 
+            batch_data = self.data_engine.get_frames(
+                batch_frames, keys=['lightning', 'landmarks'], device=self._device
             )
+            batch_data['texture_code'] = tex_params['texture_params'].clone()
+            batch_data['shape_code'] = self.data_engine.get_data(
+                'emoca_path', query_name='shape_code', device=self._device
+            )
+            synthesis_res = self.synthesis_engine.synthesis_optimize(batch_data)
             synthesis_results.update(synthesis_res)
         synthesis_results['meta_info'] = camera_params
         synthesis_results['meta_info']['shape_code'] = self.data_engine.get_emoca_params('shape_code')

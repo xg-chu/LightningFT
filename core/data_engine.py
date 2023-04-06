@@ -42,7 +42,7 @@ class DataEngine:
         assert image is not None, frame_name
         return image
 
-    def get_frames(self, frame_names, channel=3, keys=[]):
+    def get_frames(self, frame_names, channel=3, keys=[], *, device='cpu'):
         fn_mapper = {
             'emoca': self.get_emoca_params, 'landmarks': self.get_landmarks,
             'lightning': self.get_lightning_params, 'smoothed': self.get_smoothed_params, 
@@ -60,7 +60,20 @@ class DataEngine:
         results['frames'] = torch.utils.data.default_collate(results['frames'])
         for k in keys:
             results[k] = torch.utils.data.default_collate(results[k])
+        results = move_to(results, dtype=torch.float32, device=device)
         return results
+
+    def get_data(self, path_key, device='cpu', *, query_name=None):
+        if not hasattr(self, path_key.replace('path', 'data')):
+            setattr(
+                self, path_key.replace('path', 'data'), 
+                torch.load(self.path_dict[path_key], map_location='cpu')
+            )
+        data = getattr(self, path_key.replace('path', 'data'))
+        if query_name is None:
+            return move_to(data, dtype=torch.float32, device=device)
+        else:
+            return move_to(data[query_name], dtype=torch.float32, device=device)
 
     def get_landmarks(self, frame_name):
         if not hasattr(self, 'landmarks'):
@@ -159,3 +172,22 @@ class DataEngine:
             frames.sort(key=lambda x:int(x[2:-4]))
             self._frames = frames
         return self._frames
+
+
+def move_to(obj, dtype, device):
+    if torch.is_tensor(obj):
+        return obj.to(device=device, dtype=dtype)
+    elif isinstance(obj, dict):
+        res = {}
+        for k, v in obj.items():
+            res[k] = move_to(v, dtype, device)
+        return res
+    elif isinstance(obj, list):
+        res = []
+        for v in obj:
+            res.append(move_to(v, dtype, device))
+        return res
+    elif isinstance(obj, str):
+        return obj
+    else:
+        raise TypeError("Invalid type for move_to")

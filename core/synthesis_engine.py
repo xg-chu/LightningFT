@@ -32,7 +32,7 @@ class Synthesis_Engine:
         )
         print('Done.')
 
-    def _build_cameras_kwars(self, batch_size):
+    def _build_cameras_kwargs(self, batch_size):
         screen_size = torch.tensor(
             [self.image_size, self.image_size], device=self._device
         ).float()[None].repeat(batch_size, 1)
@@ -42,38 +42,9 @@ class Synthesis_Engine:
         }
         return cameras_kwargs
 
-    def optimize_camera(self, rotation, translation, pred_lmks_68, pred_lmks_dense, gt_lmks_68, gt_lmks_dense, steps=200):
-        # build trainable params
-        camera_T = torch.nn.Parameter(translation, requires_grad=True)
-        camera_R = torch.nn.Parameter(matrix_to_rotation_6d(rotation), requires_grad=True)
-        # optimizer
-        params = [{'params': [camera_R, camera_T], 'lr': 0.05}]
-        optimizer = torch.optim.Adam(params)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=300, gamma=0.1)
-        for k in range(steps):
-            points_68 = self.cameras.transform_points_screen(
-                pred_lmks_68, R=rotation_6d_to_matrix(camera_R), T=camera_T
-            )[..., :2]
-            points_dense = self.cameras.transform_points_screen(
-                pred_lmks_dense, R=rotation_6d_to_matrix(camera_R), T=camera_T
-            )[..., :2]
-            losses = {}
-            losses['lmk_68'] = lmk_loss(points_68, gt_lmks_68, self.image_size) * 65
-            losses['lmk_dense'] = lmk_loss(points_dense, gt_lmks_dense[:, self.flame_model.mediapipe_idx], self.image_size) * 65
-            all_loss = 0.
-            for key in losses.keys():
-                all_loss = all_loss + losses[key]
-            losses['all_loss'] = all_loss
-            optimizer.zero_grad()
-            all_loss.backward()
-            optimizer.step()
-            scheduler.step()
-            loss = all_loss.item()
-        return rotation_6d_to_matrix(camera_R).detach(), camera_T.detach()
-
     def optimize_texture(self, frames, lightning_params, steps=1000):
         # build camera
-        cameras_kwargs = self._build_cameras_kwars(frames.shape[0])
+        cameras_kwargs = self._build_cameras_kwargs(frames.shape[0])
         transform_matrix = lightning_params['transform_matrix'].float().to(self._device)
         rotation, translation = transform_matrix[:, :3, :3], transform_matrix[..., :3, 3]
         cameras = PerspectiveCameras(R=rotation, T=translation, **cameras_kwargs)
@@ -109,42 +80,44 @@ class Synthesis_Engine:
         results = {'texture_params': texture_params.detach().cpu()}
         return results, torch.cat([frames[:4], pred_images[:4]]).cpu()
 
-    def synthesis_optimize(self, frame_names, frames, lightning_params, landmarks, steps=500):
-        # build params
-        cameras_kwargs = self._build_cameras_kwars(frames.shape[0])
-        texture_params = torch.nn.Parameter(lightning_params['texture'].to(self._device), requires_grad=False)
-        light_params = torch.nn.Parameter(lightning_params['light'].to(self._device), requires_grad=False)
-        transform_matrix = lightning_params['transform_matrix'].float().to(self._device)
-        rotation, translation = transform_matrix[:, :3, :3], transform_matrix[..., :3, 3]
-        rotation = torch.nn.Parameter(matrix_to_rotation_6d(rotation))
-        translation = torch.nn.Parameter(translation)
-        params = [
-            # {'params': [texture_params], 'lr': 0.005, 'name': ['tex']},
-            # {'params': [light_params], 'lr': 0.01, 'name': ['sh']},
-            {'params': [rotation], 'lr': 0.005, 'name': ['r']},
-            {'params': [translation], 'lr': 0.005, 'name': ['t']},
-        ]
+    def synthesis_optimize(self, batch_data, steps=30):
+        # ['frame_names', 'frames', 'lightning', 'landmarks', 'texture_code', 'shape_code']
+        batch_size = len(batch_data['frame_names'])
+        batch_data['lightning']['flame_pose'][..., :3] *= 0
+        batch_data['frames'] = batch_data['frames'] / 255.0
+        cameras_kwargs = self._build_cameras_kwargs(batch_size)
+        # build flame params
         # flame params
-        flame_shape = lightning_params['shape'].float().to(self._device)
-        flame_exp = lightning_params['expression'].float().to(self._device)
-        flame_pose = lightning_params['flame_pose'].clone().float().to(self._device)
-        flame_pose[..., :3] *= 0
         flame_verts, pred_lmk_68, pred_lmk_dense = self.flame_model(
-            shape_params=flame_shape, expression_params=flame_exp, pose_params=flame_pose
+            shape_params=batch_data['shape_code'][None].expand(batch_size, -1), 
+            expression_params=batch_data['lightning']['expression'],
+            pose_params=batch_data['lightning']['flame_pose']
         )
         flame_verts = flame_verts * self.flame_scale
         # pred_lmk_68, pred_lmk_dense = pred_lmk_68 * self.flame_scale, pred_lmk_dense * self.flame_scale
-        frames = frames.to(self._device) / 255.0
-        
+        # build params
+        transform_matrix = batch_data['lightning']['transform_matrix']
+        rotation, translation = transform_matrix[:, :3, :3], transform_matrix[..., :3, 3]
+        translation = torch.nn.Parameter(translation)
+        rotation = torch.nn.Parameter(matrix_to_rotation_6d(rotation))
+        texture_params = torch.nn.Parameter(batch_data['texture_code'])
+        params = [
+            # {'params': [texture_params], 'lr': 0.005, 'name': ['tex']},
+            {'params': [rotation], 'lr': 0.005, 'name': ['r']},
+            {'params': [translation], 'lr': 0.005, 'name': ['t']},
+        ]
         optimizer = torch.optim.Adam(params)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=steps, gamma=0.1)
+        # run        
         for idx in range(steps):
-            self.cameras = PerspectiveCameras(R=rotation_6d_to_matrix(rotation), T=translation, **cameras_kwargs)
+            self.cameras = PerspectiveCameras(
+                R=rotation_6d_to_matrix(rotation), T=translation, **cameras_kwargs
+            )
             albedos = self.flame_texture(texture_params)
-            pred_images, mask_all, mask_face = self.mesh_render(flame_verts, albedos, light_params, self.cameras)
+            pred_images, mask_all, mask_face = self.mesh_render(flame_verts, albedos, self.cameras)
             losses = {}
-            losses['face'] = pixel_loss(pred_images, frames, mask=mask_face) * 350
-            losses['head'] = pixel_loss(pred_images, frames, mask=mask_all) * 350
+            losses['face'] = pixel_loss(pred_images, batch_data['frames'], mask=mask_face) * 350
+            losses['head'] = pixel_loss(pred_images, batch_data['frames'], mask=mask_all) * 350
             all_loss = losses['face'] + losses['head']
             optimizer.zero_grad()
             all_loss.backward(retain_graph=True)
@@ -152,7 +125,11 @@ class Synthesis_Engine:
             scheduler.step()
             loss = all_loss.item()
             # print(rotation[0], translation[0])
-            print(idx, loss)
+            # print(idx, loss)
+            # torchvision.utils.save_image(
+            #     torch.cat([batch_data['frames'][:4], pred_images[:4]]).cpu(),
+            #     './debug.jpg', nrow=4
+            # )
 
         return synthesis_results
 
