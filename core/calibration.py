@@ -2,7 +2,7 @@ import math
 
 import torch
 import torchvision
-from tqdm.rich import tqdm
+from tqdm import tqdm
 from pytorch3d.renderer import look_at_view_transform, PerspectiveCameras
 from pytorch3d.transforms import matrix_to_rotation_6d, rotation_6d_to_matrix
 
@@ -43,7 +43,7 @@ def optimize_camera(emoca_params, gt_landmarks, frames, image_size=512, steps=10
     optimizer = torch.optim.Adam(params)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=steps, gamma=0.1)
 
-    tqdm_queue = tqdm(range(steps), desc='', leave=True, miniters=100)
+    tqdm_queue = tqdm(range(steps), desc='', leave=True, miniters=100, ncols=120, colour='#95bb72')
     for k in tqdm_queue:
         points_68 = cameras.transform_points_screen(
             pred_lmk_68*flame_scale,

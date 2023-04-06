@@ -19,7 +19,7 @@ class DataEngine:
         self.path_dict['lightning_path'] = os.path.join(path_dict['output_path'], 'lightning.pth')
         self.path_dict['texture_path'] = os.path.join(path_dict['output_path'], 'texture.pth')
         self.path_dict['synthesis_path'] = os.path.join(path_dict['output_path'], 'synthesis.pth')
-        self.path_dict['smoothed_path'] = os.path.join(path_dict['output_path'], 'smoothed_results.pth')
+        self.path_dict['smoothed_path'] = os.path.join(path_dict['output_path'], 'smoothed.pth')
         self.path_dict['visul_path'] = os.path.join(path_dict['output_path'], 'track.mp4')
         self.path_dict['visul_calib_path'] = os.path.join(path_dict['output_path'], 'calibration.jpg')
         self.path_dict['visul_texture_path'] = os.path.join(path_dict['output_path'], 'texture.jpg')
@@ -43,18 +43,12 @@ class DataEngine:
         return image
 
     def get_frames(self, frame_names, channel=3, keys=[], *, device='cpu'):
-        fn_mapper = {
-            'emoca': self.get_emoca_params, 'landmarks': self.get_landmarks,
-            'lightning': self.get_lightning_params, 'smoothed': self.get_smoothed_params, 
-            'synthesis': self.get_synthesis_params, 
-        }
         results = {'frame_names': [], 'frames': []}
         for k in keys:
             results[k] = []
-
         for f in frame_names:
             for k in keys:
-                 results[k].append(fn_mapper[k](f))
+                results[k].append(self.get_data(k+'_path', query_name=f))
             results['frames'].append(self.get_frame(f, channel=channel))
             results['frame_names'].append(f)
         results['frames'] = torch.utils.data.default_collate(results['frames'])
@@ -74,41 +68,6 @@ class DataEngine:
             return move_to(data, dtype=torch.float32, device=device)
         else:
             return move_to(data[query_name], dtype=torch.float32, device=device)
-
-    def get_landmarks(self, frame_name):
-        if not hasattr(self, 'landmarks'):
-            self.landmarks = torch.load(self.path_dict['lmks_path'], map_location='cpu')
-        return self.landmarks[frame_name]
-
-    def get_emoca_params(self, frame_name):
-        if not hasattr(self, 'emoca_params'):
-            self.emoca_params = torch.load(self.path_dict['emoca_path'], map_location='cpu')
-        return self.emoca_params[frame_name]
-    
-    def get_lightning_params(self, frame_name):
-        if not hasattr(self, 'lightning_params'):
-            self.lightning_params = torch.load(self.path_dict['lightning_path'], map_location='cpu')
-        return self.lightning_params[frame_name]
-
-    def get_synthesis_params(self, frame_name):
-        if not hasattr(self, 'synthesis_params'):
-            self.synthesis_params = torch.load(self.path_dict['synthesis_path'], map_location='cpu')
-        return self.synthesis_params[frame_name]
-
-    def get_smoothed_params(self, frame_name):
-        if not hasattr(self, 'smoothed_params'):
-            self.smoothed_params = torch.load(self.path_dict['smoothed_path'], map_location='cpu')
-        return self.smoothed_params[frame_name]
-
-    def get_camera_params(self, ):
-        if not hasattr(self, 'camera_params'):
-            self.camera_params = torch.load(self.path_dict['camera_path'], map_location='cpu')
-        return self.camera_params
-
-    def get_tex_params(self, ):
-        if not hasattr(self, 'tex_params'):
-            self.tex_params = torch.load(self.path_dict['texture_path'], map_location='cpu')
-        return self.tex_params
 
     def check_path(self, path_key):
         if os.path.exists(self.path_dict[path_key]):
@@ -192,7 +151,8 @@ def move_to(obj, dtype, device):
         for v in obj:
             res.append(move_to(v, dtype, device))
         return res
-    elif isinstance(obj, str):
+    elif isinstance(obj, str) or isinstance(obj, float) or isinstance(obj, int):
         return obj
     else:
+        print(obj)
         raise TypeError("Invalid type for move_to")

@@ -1,20 +1,15 @@
-import os
-import math
 import torch
-import numpy as np
-import torchvision
-from tqdm.rich import tqdm
+from tqdm import tqdm
 from pytorch3d.renderer import PerspectiveCameras, look_at_view_transform
-from pytorch3d.transforms import euler_angles_to_matrix, matrix_to_rotation_6d, rotation_6d_to_matrix
+from pytorch3d.transforms import matrix_to_rotation_6d, rotation_6d_to_matrix
 
 from utils.renderer import Texture_Renderer
 from model.FLAME.FLAME import FLAME_MP, FLAME_Tex
 
-FLAME_MODEL_PATH = './assets/FLAME'
-
 class Synthesis_Engine:
-    def __init__(self, device='cuda', lazy_init=True):
+    def __init__(self, flame_model_path, device='cuda', lazy_init=True):
         self._device = device
+        self._flame_model_path = flame_model_path
 
     def init_model(self, camera_params, image_size=512):
         print('Initializing synthesis models...')
@@ -24,11 +19,11 @@ class Synthesis_Engine:
         self.focal_length = camera_params['focal_length'].to(self._device)
         self.principal_point = camera_params['principal_point'].to(self._device)
         # build flame
-        self.flame_model = FLAME_MP(FLAME_MODEL_PATH, 100, 50).to(self._device)
-        self.flame_texture = FLAME_Tex(FLAME_MODEL_PATH, image_size=512).to(self._device)
+        self.flame_model = FLAME_MP(self._flame_model_path, 100, 50).to(self._device)
+        self.flame_texture = FLAME_Tex(self._flame_model_path, image_size=512).to(self._device)
         self.flame_face_mask = self.flame_texture.masks.face
         self.mesh_render = Texture_Renderer(
-            512, flame_path=FLAME_MODEL_PATH, flame_mask=self.flame_face_mask, device=self._device
+            512, flame_path=self._flame_model_path, flame_mask=self.flame_face_mask, device=self._device
         )
         print('Done.')
 
@@ -42,22 +37,23 @@ class Synthesis_Engine:
         }
         return cameras_kwargs
 
-    def optimize_texture(self, frames, lightning_params, steps=1000):
+    def optimize_texture(self, batch_data, steps=1000):
+        # ['frame_names', 'frames', 'lightning', 'shape_code']
+        batch_size = len(batch_data['frame_names'])
+        batch_data['lightning']['flame_pose'][..., :3] *= 0
+        batch_data['frames'] = batch_data['frames'] / 255.0
+        cameras_kwargs = self._build_cameras_kwargs(batch_size)
         # build camera
-        cameras_kwargs = self._build_cameras_kwargs(frames.shape[0])
-        transform_matrix = lightning_params['transform_matrix'].float().to(self._device)
+        transform_matrix = batch_data['lightning']['transform_matrix']
         rotation, translation = transform_matrix[:, :3, :3], transform_matrix[..., :3, 3]
         cameras = PerspectiveCameras(R=rotation, T=translation, **cameras_kwargs)
         # flame params
-        flame_shape = lightning_params['shape'].float().to(self._device)
-        flame_exp = lightning_params['expression'].float().to(self._device)
-        flame_pose = lightning_params['flame_pose'].clone().float().to(self._device)
-        flame_pose[..., :3] *= 0
         flame_verts, _, _ = self.flame_model(
-            shape_params=flame_shape, expression_params=flame_exp, pose_params=flame_pose
+            shape_params=batch_data['shape_code'][None].expand(batch_size, -1), 
+            expression_params=batch_data['lightning']['expression'],
+            pose_params=batch_data['lightning']['flame_pose']
         )
         flame_verts = flame_verts * self.flame_scale
-        frames = frames.to(self._device) / 255.0
         # optimize
         texture_params = torch.nn.Parameter(torch.rand(1, 140).to(self._device))
         params = [
@@ -65,12 +61,12 @@ class Synthesis_Engine:
         ]
         optimizer = torch.optim.Adam(params)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=steps, gamma=0.1)
-        tqdm_queue = tqdm(range(steps), desc='', leave=True, miniters=10)
+        tqdm_queue = tqdm(range(steps), desc='', leave=True, miniters=10, ncols=120, colour='#95bb72')
         for k in tqdm_queue:
             albedos = self.flame_texture(texture_params)
             pred_images, masks_all, masks_face = self.mesh_render(flame_verts, albedos, cameras)
-            loss_head = pixel_loss(pred_images, frames, mask=masks_all)
-            loss_face = pixel_loss(pred_images, frames, mask=masks_face)
+            loss_head = pixel_loss(pred_images, batch_data['frames'], mask=masks_all)
+            loss_face = pixel_loss(pred_images, batch_data['frames'], mask=masks_face)
             all_loss = (loss_head + loss_face) * 350
             optimizer.zero_grad()
             all_loss.backward()
@@ -78,7 +74,7 @@ class Synthesis_Engine:
             scheduler.step()
             tqdm_queue.set_description(f'Loss for tex {all_loss.item():.4f}')
         results = {'texture_params': texture_params.detach().cpu()}
-        return results, torch.cat([frames[:4], pred_images[:4]]).cpu()
+        return results, torch.cat([batch_data['frames'][:4], pred_images[:4]]).cpu()
 
     def synthesis_optimize(self, batch_data, steps=30):
         # ['frame_names', 'frames', 'lightning', 'landmarks', 'texture_code', 'shape_code']
@@ -115,12 +111,11 @@ class Synthesis_Engine:
             )
             albedos = self.flame_texture(texture_params)
             pred_images, mask_all, mask_face = self.mesh_render(flame_verts, albedos, self.cameras)
-            losses = {}
-            losses['face'] = pixel_loss(pred_images, batch_data['frames'], mask=mask_face) * 350
-            losses['head'] = pixel_loss(pred_images, batch_data['frames'], mask=mask_all) * 350
-            all_loss = losses['face'] + losses['head']
+            loss_face = pixel_loss(pred_images, batch_data['frames'], mask=mask_face)
+            loss_head = pixel_loss(pred_images, batch_data['frames'], mask=mask_all)
+            all_loss = (loss_face + loss_head) * 350
             optimizer.zero_grad()
-            all_loss.backward(retain_graph=True)
+            all_loss.backward()
             optimizer.step()
             scheduler.step()
             loss = all_loss.item()
