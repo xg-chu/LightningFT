@@ -51,5 +51,9 @@ class Emoca_V2_Engine:
             # please input normed image
             croped_frame = croped_frame.to(self._device)[None]/255.0
             emoca_result = self.emoca_model.encode(croped_frame)
-            emoca_result['crop_box'] = crop_center.cpu().half()
+            bbox = torch.stack([
+                crop_center[0] - crop_center[2]/2, crop_center[1] - crop_center[2]/2,
+                crop_center[0] + crop_center[2]/2, crop_center[1] + crop_center[2]/2,
+            ])
+            emoca_result['crop_box'] = bbox.cpu().half()
             return emoca_result

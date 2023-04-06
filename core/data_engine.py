@@ -46,16 +46,16 @@ class DataEngine:
         fn_mapper = {
             'emoca': self.get_emoca_params, 'landmarks': self.get_landmarks,
             'lightning': self.get_lightning_params, 'smoothed': self.get_smoothed_params, 
+            'synthesis': self.get_synthesis_params, 
         }
         results = {'frame_names': [], 'frames': []}
         for k in keys:
             results[k] = []
 
         for f in frame_names:
-            frame = self.get_frame(f, channel=channel)
             for k in keys:
                  results[k].append(fn_mapper[k](f))
-            results['frames'].append(frame)
+            results['frames'].append(self.get_frame(f, channel=channel))
             results['frame_names'].append(f)
         results['frames'] = torch.utils.data.default_collate(results['frames'])
         for k in keys:
@@ -89,6 +89,11 @@ class DataEngine:
         if not hasattr(self, 'lightning_params'):
             self.lightning_params = torch.load(self.path_dict['lightning_path'], map_location='cpu')
         return self.lightning_params[frame_name]
+
+    def get_synthesis_params(self, frame_name):
+        if not hasattr(self, 'synthesis_params'):
+            self.synthesis_params = torch.load(self.path_dict['synthesis_path'], map_location='cpu')
+        return self.synthesis_params[frame_name]
 
     def get_smoothed_params(self, frame_name):
         if not hasattr(self, 'smoothed_params'):

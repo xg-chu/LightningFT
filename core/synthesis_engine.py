@@ -124,13 +124,25 @@ class Synthesis_Engine:
             optimizer.step()
             scheduler.step()
             loss = all_loss.item()
-            # print(rotation[0], translation[0])
-            # print(idx, loss)
+            # ### DEBUG
+            # print(idx, rotation[0], translation[0], loss)
             # torchvision.utils.save_image(
             #     torch.cat([batch_data['frames'][:4], pred_images[:4]]).cpu(),
             #     './debug.jpg', nrow=4
             # )
-
+        # gather results
+        synthesis_results = {}
+        transform_matrix = torch.cat(
+            [rotation_6d_to_matrix(rotation), translation[:, :, None]], dim=-1
+        )
+        
+        for idx, name in enumerate(batch_data['frame_names']):
+            synthesis_results[name] = {
+                'flame_pose': batch_data['lightning']['flame_pose'][idx].half().cpu(),
+                'expression': batch_data['lightning']['expression'][idx].half().cpu(),
+                'bbox': batch_data['lightning']['bbox'][idx].half().cpu(),
+                'transform_matrix': transform_matrix[idx].half().cpu()
+            }
         return synthesis_results
 
 

@@ -133,4 +133,6 @@ class Texture_Renderer(nn.Module):
                 )
                 masks_face = silhouette_renderer(meshes_world=meshes_masked)
                 masks_face = masks_face[..., 3:].permute(0, 3, 1, 2) > 0.0
+            else:
+                masks_face = None
         return images, masks_all, masks_face

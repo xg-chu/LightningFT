@@ -21,11 +21,12 @@ from .detection_engine import Detection_Engine
 from .emoca_engine import Emoca_V2_Engine
 from .lightning_engine import Lightning_Engine
 from .synthesis_engine import Synthesis_Engine
+from .render_engine import Render_Engine
 # from utils.renderer import Mesh_Renderer, Point_Renderer
 # from utils.utils import read_json, save_json
 # from model.FLAME.FLAME import FLAME_MP
 # from assets.FLAME.landmarks import get_mediapipe_indices
-
+FLAME_MODEL_PATH = './assets/FLAME'
 EMOCA_CKPT_PATH = './assets/EMOCA/EMOCA_v2_lr_mse_20/detail/checkpoints/deca-epoch=10-val_loss/dataloader_idx_0=3.25521111.ckpt'
 
 class TrackEngine:
@@ -71,7 +72,7 @@ class TrackEngine:
         # synthesis optimization
         if self._args_config.synthesis and not self.data_engine.check_path('synthesis_path'):
             synthesis_results = self.run_synthesis()
-            raise Exception
+            self.data_engine.save(synthesis_results, 'synthesis_path')
         # smoothed landmarks
         if not self.data_engine.check_path('smoothed_path') and not self._args_config.wo_smooth:
             smoothed_results = self.run_smoothing()
@@ -163,16 +164,22 @@ class TrackEngine:
     def render_video(self, ):
         from pytorch3d.renderer import look_at_view_transform
         print('Rendering...')
-        anno_key = 'smoothed'
+        anno_key = 'synthesis'
         camera_params = self.data_engine.get_camera_params()
-        self.lightning_engine.init_model(camera_params, image_size=512)
-        mini_batchs = build_minibatch(self.data_engine.frames()[:1600], 64)
+        render_engine = Render_Engine(camera_params, FLAME_MODEL_PATH, with_texture=False, device=self._device)
         vis_images = []
-        shape_code = self.data_engine.get_smoothed_params('meta_info')['shape_code']
+        mini_batchs = build_minibatch(self.data_engine.frames()[:1600], 128)
         for batch_frames in tqdm(mini_batchs):
-            batch_data = self.data_engine.get_frames(batch_frames, keys=[anno_key])
-            render_result = self.lightning_engine.render(batch_data['frames'], batch_data[anno_key], shape_code)
-            vis_images += render_result
+            batch_data = self.data_engine.get_frames(
+                batch_frames, keys=['synthesis'], device=self._device
+            )
+            batch_data['texture_code'] = self.data_engine.get_data(
+                'texture_path', query_name='texture_params', device=self._device
+            )
+            batch_data['shape_code'] = self.data_engine.get_data(
+                'emoca_path', query_name='shape_code', device=self._device
+            )
+            vis_images += render_engine(batch_data, anno_key)
         vis_images = torch.stack(vis_images, dim=0).permute(0, 2, 3, 1).to(torch.uint8).cpu()
         print('Done.')
         return vis_images
