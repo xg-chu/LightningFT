@@ -78,10 +78,16 @@ class TrackEngine:
     def run_landmarks(self, ):
         all_landmarks = {}
         print('Annotating landmarks...')
+        last_frame_name = None
         for frame_name in tqdm(self.data_engine.frames(), ncols=120, colour='#95bb72'):
             frame = self.data_engine.get_frame(frame_name)
             landmarks = self.lmks_engine.process_face(frame) # please input unnorm image
+            if landmarks['lmks'] is None:
+                landmarks['lmks'] = all_landmarks[last_frame_name]['lmks']
+            if landmarks['lmks_dense'] is None:
+                landmarks['lmks_dense'] = all_landmarks[last_frame_name]['lmks_dense']
             all_landmarks[frame_name] = landmarks
+            last_frame_name = frame_name
         print('Done.')
         return all_landmarks
 
