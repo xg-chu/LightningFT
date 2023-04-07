@@ -159,7 +159,7 @@ class TrackEngine:
         camera_params = self.data_engine.get_data('camera_path', device=self._device)
         render_engine = Render_Engine(camera_params, FLAME_MODEL_PATH, with_texture=with_texture, device=self._device)
         vis_images = []
-        mini_batchs = build_minibatch(self.data_engine.frames()[:1600], 128)
+        mini_batchs = build_minibatch(self.data_engine.frames()[:1600], 64)
         for batch_frames in tqdm(mini_batchs, ncols=120, colour='#95bb72'):
             batch_data = self.data_engine.get_frames(batch_frames, keys=[anno_key], device=self._device)
             if with_texture:
