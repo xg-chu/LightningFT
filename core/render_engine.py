@@ -43,6 +43,7 @@ class Render_Engine(torch.nn.Module):
         }
         return cameras_kwargs
 
+    @torch.no_grad()
     def forward(self, batch_data, anno_key):
         batch_size = len(batch_data['frame_names'])
         cameras_kwargs = self._build_cameras_kwargs(batch_size)
@@ -79,5 +80,5 @@ class Render_Engine(torch.nn.Module):
             # vis_i = torchvision.utils.draw_keypoints(vis_i.to(torch.uint8), pred_lmk_68[idx:idx+1], colors="white", radius=1.5)
             # vis_i = torchvision.utils.draw_bounding_boxes(vis_i, batch_data[anno_key]['bbox'][idx:idx+1])
             vis_image = torchvision.utils.make_grid([frame, images[idx], points_image[idx], vis_i], nrow=4)
-            vis_images.append(vis_image)
+            vis_images.append(vis_image.cpu())
         return vis_images
