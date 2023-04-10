@@ -19,6 +19,7 @@ do
     file_path="${target_path}/${file}"
     if [[ $file_path == *".mp4"* ]] && ! [[ $file_path == *"RD_Radio"* ]]; then
         echo "python track_lightning.py -d 7 --data $file_path -v --synthesis"
-        python track_lightning.py -d 7 --data $file_path -v --synthesis
+        python track_lightning.py -d 7 --data $file_path --no_smooth
+        # python track_lightning.py -d 7 --data $file_path --synthesis
     fi
 done

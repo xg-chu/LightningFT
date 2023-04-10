@@ -63,7 +63,7 @@ class TrackEngine:
             synthesis_results = self.run_synthesis()
             self.data_engine.save(synthesis_results, 'synthesis_path')
         # # smoothed landmarks
-        if not self.data_engine.check_path('smoothed_path'):
+        if not self._args_config.no_smooth and not self.data_engine.check_path('smoothed_path'):
             smoothed_results = self.run_smoothing(
                 anno_key='synthesis' if self._args_config.synthesis else 'lightning', 
                 type=self._args_config.smooth_type
