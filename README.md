@@ -20,7 +20,7 @@ TODO
 * pytorch3d==0.7.2 (Following [PyTorch3D](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md))
 * [mediapipe](https://google.github.io/mediapipe/)
 * [face_alignment](https://github.com/1adrianb/face-alignment)
-* tqdm, rich, lmdb, colored, pykalman, av, pytorch-lightning
+* tqdm, rich, lmdb, colored, pykalman, av, pytorch-lightning, chumpy
 
 ## Usage
 Our tracker firstly tracks the expression and pose of the target head based on EMOCA v2, then optimize the camera pose based on landmarks (face_alignment and mediapipe).
