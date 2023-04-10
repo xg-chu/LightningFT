@@ -92,17 +92,18 @@ class DataEngine:
     def build_data_lmdb(self, ):
         if not os.path.exists(self.path_dict['dataset_path']):
             print('Decoding video.....')
-            frames, _, meta_data = torchvision.io.read_video(
-                self.path_dict['video_path'], pts_unit='sec', output_format='TCHW'
-            )
-            frames = torchvision.transforms.functional.resize(frames, size=512, antialias=True)
-            frames = torchvision.transforms.functional.center_crop(frames, output_size=512).float()
+            video = torchvision.io.VideoReader(self.path_dict['video_path'], 'video')
+            meta_data = video.get_metadata()
+            approx_len = int(meta_data['video']['duration'][0] * meta_data['video']['fps'][0]) + 1
             print('Dumpling video to buffer lmdb.....')
             os.makedirs(self.path_dict['dataset_path'])
             env = lmdb.open(self.path_dict['dataset_path'], map_size=1099511627776) # Maximum 1T
             txn = env.begin(write=True)
             counter = 0
-            for f_idx, frame in enumerate(tqdm(frames, ncols=80, colour='#95bb72')):
+            for f_idx, frame in enumerate(tqdm(video, ncols=80, colour='#95bb72', total=approx_len)):
+                frame = frame['data']
+                frame = torchvision.transforms.functional.resize(frame, size=512, antialias=True)
+                frame = torchvision.transforms.functional.center_crop(frame, output_size=512).float()
                 img_name = 'f_{:07d}.jpg'.format(f_idx)
                 img_encoded = torchvision.io.encode_jpeg(frame.to(torch.uint8))
                 img_encoded = b''.join(map(lambda x:int.to_bytes(x,1,'little'), img_encoded.numpy().tolist()))
