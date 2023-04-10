@@ -100,6 +100,8 @@ class DataEngine:
             env = lmdb.open(self.path_dict['dataset_path'], map_size=1099511627776) # Maximum 1T
             txn = env.begin(write=True)
             counter = 0
+            #for frame, pts in itertools.islice(video.seek(2), 10):
+            #    frames.append(frame)
             for f_idx, frame in enumerate(tqdm(video, ncols=80, colour='#95bb72', total=approx_len)):
                 frame = frame['data']
                 frame = torchvision.transforms.functional.resize(frame, size=512, antialias=True)
