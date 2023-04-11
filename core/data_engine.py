@@ -5,7 +5,7 @@ import lmdb
 import torch
 import numpy as np
 import torchvision
-from tqdm import tqdm
+from tqdm.rich import tqdm
 
 from utils.utils import pretty_dict
 

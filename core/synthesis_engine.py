@@ -1,5 +1,5 @@
 import torch
-from tqdm import tqdm
+from tqdm.rich import tqdm
 from pytorch3d.renderer import PerspectiveCameras, look_at_view_transform
 from pytorch3d.transforms import matrix_to_rotation_6d, rotation_6d_to_matrix
 
@@ -37,7 +37,7 @@ class Synthesis_Engine:
         }
         return cameras_kwargs
 
-    def optimize_texture(self, batch_data, steps=1000):
+    def optimize_texture(self, batch_data, steps=160):
         # ['frame_names', 'frames', 'lightning', 'shape_code']
         batch_size = len(batch_data['frame_names'])
         batch_data['lightning']['flame_pose'][..., :3] *= 0
@@ -57,11 +57,11 @@ class Synthesis_Engine:
         # optimize
         texture_params = torch.nn.Parameter(torch.rand(1, 140).to(self._device))
         params = [
-            {'params': [texture_params], 'lr': 0.005, 'name': ['tex']},
+            {'params': [texture_params], 'lr': 0.1, 'name': ['tex']},
         ]
         optimizer = torch.optim.Adam(params)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=steps, gamma=0.1)
-        tqdm_queue = tqdm(range(steps), desc='', leave=True, miniters=10, ncols=120, colour='#95bb72')
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=steps, gamma=0.5)
+        tqdm_queue = tqdm(range(steps), desc='', leave=True, miniters=1, ncols=120, colour='#95bb72')
         for k in tqdm_queue:
             albedos = self.flame_texture(texture_params)
             pred_images, masks_all, masks_face = self.mesh_render(flame_verts, albedos, cameras)
@@ -72,7 +72,7 @@ class Synthesis_Engine:
             all_loss.backward()
             optimizer.step()
             scheduler.step()
-            tqdm_queue.set_description(f'Loss for tex {all_loss.item():.4f}')
+            tqdm_queue.set_description(f'Loss(Texture): {all_loss.item():.4f}')
         results = {'texture_params': texture_params.detach().cpu()}
         return results, torch.cat([batch_data['frames'][:4], pred_images[:4]]).cpu()
 

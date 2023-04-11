@@ -5,7 +5,7 @@ sys.path.append('./')
 
 import torch
 import numpy as np
-from tqdm import tqdm
+from tqdm.rich import tqdm
 
 from .data_engine import DataEngine
 from .calibration import optimize_camera

@@ -1,6 +1,7 @@
 import os
 import sys
 import argparse
+import warnings
 sys.path.append('./')
 
 def set_devices(target_device: str):
@@ -18,6 +19,7 @@ def set_devices(target_device: str):
 
 
 if __name__ == "__main__":
+    warnings.filterwarnings("ignore")
     ### CONFIG
     parser = argparse.ArgumentParser()
     parser.add_argument('--data')

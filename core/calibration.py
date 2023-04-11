@@ -2,7 +2,7 @@ import math
 
 import torch
 import torchvision
-from tqdm import tqdm
+from tqdm.rich import tqdm
 from pytorch3d.renderer import look_at_view_transform, PerspectiveCameras
 from pytorch3d.transforms import matrix_to_rotation_6d, rotation_6d_to_matrix
 
@@ -66,7 +66,7 @@ def optimize_camera(emoca_params, gt_landmarks, frames, image_size=512, steps=10
         optimizer.step()
         scheduler.step()
         loss = all_loss.item()
-        tqdm_queue.set_description(f'Loss for camera {loss:.4f}')
+        tqdm_queue.set_description(f'Loss(Camera): {loss:.4f}')
     # visualization
     visualization = []
     for idx, frame in enumerate(frames):
