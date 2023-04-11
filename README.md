@@ -29,7 +29,7 @@ unzip assets/FLAME_embedding.zip -d assets/FLAME
 * pytorch3d == 0.7.3 (Following [PyTorch3D](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md))
 * [mediapipe](https://google.github.io/mediapipe/)
 * [face_alignment](https://github.com/1adrianb/face-alignment)
-* ffmpeg >= 5.1 (conda install -c conda-forge ffmpeg)
+* ffmpeg >= 5.1 (conda install -c conda-forge ffmpeg) [ref](https://johnvansickle.com/ffmpeg/)
 * pip install tqdm rich lmdb colored pykalman av pytorch-lightning chumpy
 
 ## Usage
