@@ -81,7 +81,7 @@ class Texture_Renderer(nn.Module):
         super(Texture_Renderer, self).__init__()
         self.device = device
         # objects
-        obj_filename = os.path.join(flame_path, 'head_template_mesh.obj')
+        obj_filename = os.path.join(flame_path, 'FLAME_embedding', 'head_template_mesh.obj')
         _, faces, aux = load_obj(obj_filename, load_textures=False)
         self.uvverts = aux.verts_uvs[None, ...].to(self.device)  # (N, V, 2)
         self.uvfaces = faces.textures_idx[None, ...].to(self.device)  # (N, F, 3)

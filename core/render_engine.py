@@ -24,7 +24,9 @@ class Render_Engine(torch.nn.Module):
         self.point_render = Point_Renderer(image_size=image_size, device=self._device)
         if not with_texture:
             self.mesh_render = Mesh_Renderer(
-                512, obj_filename=os.path.join(flame_model_path, 'head_template_mesh.obj'), device=self._device
+                512, obj_filename=os.path.join(
+                    flame_model_path, 'FLAME_embedding', 'head_template_mesh.obj'
+                ), device=self._device
             )
         else:
             self.flame_texture = FLAME_Tex(flame_model_path, image_size=image_size).to(self._device)

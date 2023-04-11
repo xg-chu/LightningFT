@@ -4,17 +4,16 @@ import torchvision
 
 from model.EMOCA import EMOCA
 
-EMOCA_CKPT_PATH = './assets/EMOCA/EMOCA_v2_lr_mse_20/detail/checkpoints/deca-epoch=10-val_loss/dataloader_idx_0=3.25521111.ckpt'
-
 class Emoca_V2_Engine:
-    def __init__(self, device='cuda', lazy_init=True):
+    def __init__(self, emoca_ckpt_path, device='cuda', lazy_init=True):
+        self._emoca_ckpt_path = emoca_ckpt_path
         self._device = device
         if not lazy_init:
             self._init_model()
 
     def _init_model(self, ):
         print('Initializing trimmed EMOCA V2 models...')
-        ckpt = torch.load(EMOCA_CKPT_PATH, map_location='cpu')['state_dict']
+        ckpt = torch.load(self._emoca_ckpt_path, map_location='cpu')['state_dict']
         trimmed_ckpt = {}
         for key in list(ckpt.keys()):
             if 'E_flame' in key or 'E_expression' in key:

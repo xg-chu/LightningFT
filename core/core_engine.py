@@ -33,7 +33,7 @@ class TrackEngine:
         self.data_engine.build_data_lmdb()
         # lmks engine
         self.lmks_engine = Detection_Engine(device=device, lazy_init=True)
-        self.emoca_engine = Emoca_V2_Engine(device=device, lazy_init=True)
+        self.emoca_engine = Emoca_V2_Engine(EMOCA_CKPT_PATH, device=device, lazy_init=True)
         self.lightning_engine = Lightning_Engine(FLAME_MODEL_PATH, device=device, lazy_init=True)
         self.synthesis_engine = Synthesis_Engine(FLAME_MODEL_PATH, device=device, lazy_init=True)
 

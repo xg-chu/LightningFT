@@ -21,7 +21,7 @@ class FLAME(nn.Module):
     def __init__(self, flame_path, n_shape, n_exp):
         super(FLAME, self).__init__()
         # print("creating the FLAME Model")
-        with open(os.path.join(flame_path, 'FLAME2020', 'generic_model.pkl'), 'rb') as f:
+        with open(os.path.join(flame_path, 'generic_model.pkl'), 'rb') as f:
             ss = pickle.load(f, encoding='latin1')
             flame_model = Struct(**ss)
         self.dtype = torch.float32
@@ -62,7 +62,7 @@ class FLAME(nn.Module):
 
         # Static and Dynamic Landmark embeddings for FLAME
         lmk_embeddings = np.load(
-            os.path.join(flame_path, 'landmark_embedding.npy'), 
+            os.path.join(flame_path, 'FLAME_embedding', 'landmark_embedding.npy'), 
             allow_pickle=True, encoding='latin1'
         )
         lmk_embeddings = lmk_embeddings[()]
@@ -190,7 +190,7 @@ class FLAME_MP(FLAME):
         super().__init__(flame_path, n_shape, n_exp)
         # static MEDIAPIPE landmark embeddings for FLAME
         lmk_embeddings_mediapipe = np.load(
-            os.path.join(flame_path, 'mediapipe', 'mediapipe_landmark_embedding.npz'),
+            os.path.join(flame_path, 'FLAME_embedding', 'mediapipe_landmark_embedding.npz'),
             allow_pickle=True, encoding='latin1'
         )
         self.register_buffer(
@@ -201,10 +201,7 @@ class FLAME_MP(FLAME):
             'lmk_bary_coords_mediapipe',
             torch.tensor(lmk_embeddings_mediapipe['lmk_b_coords'], dtype=self.dtype)
         )
-        self.mediapipe_idx = np.load(
-            os.path.join(flame_path, 'mediapipe', 'mediapipe_landmark_embedding.npz'), 
-            allow_pickle=True, encoding='latin1'
-        )['landmark_indices'].astype(int)
+        self.mediapipe_idx = lmk_embeddings_mediapipe['landmark_indices'].astype(int)
         
     def forward(self, shape_params=None, expression_params=None, pose_params=None, eye_pose_params=None):
         vertices, landmarks2d_68, landmarks3d = super().forward(
@@ -224,9 +221,7 @@ class FLAME_MP(FLAME):
 class FLAME_Tex(nn.Module):
     def __init__(self, flame_path, n_tex=140, image_size=512):
         super(FLAME_Tex, self).__init__()
-        tex_space = np.load(
-            os.path.join(flame_path, 'FLAME2020', 'FLAME_texture.npz')
-        )
+        tex_space = np.load(os.path.join(flame_path, 'FLAME_texture.npz'))
         # FLAME texture
         if 'tex_dir' in tex_space.files:
             mu_key = 'mean'
@@ -247,7 +242,7 @@ class FLAME_Tex(nn.Module):
         self.register_buffer('texture_basis', texture_basis)
         self.image_size = image_size
         # MASK
-        with open(os.path.join(flame_path, 'FLAME2020', 'FLAME_masks.pkl'), 'rb') as f:
+        with open(os.path.join(flame_path, 'FLAME_embedding', 'FLAME_masks.pkl'), 'rb') as f:
             ss = pickle.load(f, encoding='latin1')
             self.masks = Struct(**ss)
 
