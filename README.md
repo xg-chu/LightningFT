@@ -25,7 +25,7 @@ unzip assets/FLAME_embedding.zip -d assets/FLAME
 
 ## Requirement
 * python >= 3.8
-* pytorch ==2.0
+* pytorch == 2.0
 * pytorch3d == 0.7.3 (Following [PyTorch3D](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md))
 * [mediapipe](https://google.github.io/mediapipe/)
 * [face_alignment](https://github.com/1adrianb/face-alignment)
