@@ -72,15 +72,17 @@ class Render_Engine(torch.nn.Module):
         else:
             images, alpha_images = self.mesh_render(flame_verts, cameras)
         # gather
+        points_68 = cameras.transform_points_screen(pred_lmk_68)[..., :2]
+        points_dense = cameras.transform_points_screen(pred_lmk_dense)[..., :2]
         vis_images = []
         alpha_images = alpha_images.expand(-1, 3, -1, -1)
         for idx, frame in enumerate(batch_data['frames']):
             vis_i = frame.clone()
             vis_i[alpha_images[idx]>0.5] *= 0.3
             vis_i[alpha_images[idx]>0.5] += (images[idx, alpha_images[idx]>0.5] * 0.7)
-            # vis_i = torchvision.utils.draw_keypoints(vis_i.to(torch.uint8), pred_lmk_dense[idx:idx+1], colors="white", radius=1.5)
-            # vis_i = torchvision.utils.draw_keypoints(vis_i.to(torch.uint8), pred_lmk_68[idx:idx+1], colors="white", radius=1.5)
-            # vis_i = torchvision.utils.draw_bounding_boxes(vis_i, batch_data[anno_key]['bbox'][idx:idx+1])
-            vis_image = torchvision.utils.make_grid([frame, images[idx], points_image[idx], vis_i], nrow=4)
-            vis_images.append(vis_image.cpu())
+            vis_i = torchvision.utils.draw_keypoints(vis_i.to(torch.uint8), points_dense[idx:idx+1], colors="red", radius=1.5)
+            vis_i = torchvision.utils.draw_keypoints(vis_i.to(torch.uint8), points_68[idx:idx+1], colors="blue", radius=1.5)
+            vis_i = torchvision.utils.draw_bounding_boxes(vis_i, batch_data[anno_key]['bbox'][idx:idx+1])
+            vis_image = torchvision.utils.make_grid([frame.cpu(), images[idx].cpu(), points_image[idx].cpu(), vis_i.cpu()], nrow=4)
+            vis_images.append(vis_image)
         return vis_images

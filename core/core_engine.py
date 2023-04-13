@@ -159,14 +159,14 @@ class TrackEngine:
         camera_params = self.data_engine.get_data('camera_path', device=self._device)
         render_engine = Render_Engine(camera_params, FLAME_MODEL_PATH, with_texture=with_texture, device=self._device)
         vis_images = []
-        mini_batchs = build_minibatch(self.data_engine.frames()[:1600], 64)
+        mini_batchs = build_minibatch(self.data_engine.frames()[:500], 64)
         for batch_frames in tqdm(mini_batchs, ncols=120, colour='#95bb72'):
             batch_data = self.data_engine.get_frames(batch_frames, keys=[anno_key], device=self._device)
             if with_texture:
                 batch_data['texture_code'] = self.data_engine.get_data('texture_path', query_name='texture_params', device=self._device)
             batch_data['shape_code'] = self.data_engine.get_data('emoca_path', query_name='shape_code', device=self._device)
             vis_images += render_engine(batch_data, anno_key)
-        vis_images = [i.to(torch.uint8).cpu() for i in vis_images]
+        # vis_images = [i.to(torch.uint8).cpu() for i in vis_images]
         vis_images = torch.stack(vis_images, dim=0).permute(0, 2, 3, 1)
         print('Done.')
         return vis_images
@@ -190,15 +190,15 @@ class TrackEngine:
                 translations.append(transform_matrix[:3, 3].numpy())
             bboxes = smooth_params(np.array(bboxes))
             quaternions = smooth_params(np.array(quaternions))
-            quaternions = smooth_params(np.array(quaternions))
+            # quaternions = smooth_params(np.array(quaternions))
             translations = smooth_params(np.array(translations))
-            translations = smooth_params(np.array(translations))
+            # translations = smooth_params(np.array(translations))
             for idx, frame_name in enumerate(self.data_engine.frames()):
                 smoothed_results[frame_name]['bbox'] = torch.tensor(bboxes[idx])
                 rotation = rotation_6d_to_matrix(torch.tensor(quaternions[idx]))
                 affine_matrix = torch.cat([rotation, torch.tensor(translations[idx])[:, None]], dim=-1).half().cpu()
                 smoothed_results[frame_name]['transform_matrix'] = affine_matrix
-            smoothed_results['meta_info'] = self.data_engine.get_data(anno_key+'_path', query_name=frame_name)
+            smoothed_results['meta_info'] = self.data_engine.get_data(anno_key+'_path', query_name='meta_info')
             print('Done')
         return smoothed_results
 
