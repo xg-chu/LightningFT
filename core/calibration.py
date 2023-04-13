@@ -8,7 +8,7 @@ from pytorch3d.transforms import matrix_to_rotation_6d, rotation_6d_to_matrix
 
 from model.FLAME.FLAME import FLAME_MP
 
-def optimize_camera(emoca_params, gt_landmarks, frames, image_size=512, steps=1000, device='cuda'):
+def optimize_camera(emoca_params, gt_landmarks, frames, image_size=512, steps=1600, device='cuda'):
     # build params
     batch_size = emoca_params['shape'].shape[0]
     for key in emoca_params:
@@ -20,7 +20,12 @@ def optimize_camera(emoca_params, gt_landmarks, frames, image_size=512, steps=10
     _, pred_lmk_68, pred_lmk_dense = flame(
         shape_params=emoca_params['shape'], expression_params=emoca_params['exp'], pose_params=emoca_params['pose']
     )
-    flame_scale = (emoca_params['cam'][:, 0]*(emoca_params['crop_box'][:, 2]/image_size)).mean().item()
+    # verts, _, _ = flame(
+    #     shape_params=emoca_params['shape'], expression_params=emoca_params['exp'], pose_params=emoca_params['pose']*0
+    # )
+    # print(verts.shape)
+    # print(verts[0].min(dim=0), verts[0].max(dim=0))
+    flame_scale = 5.0 #(emoca_params['cam'][:, 0]*(emoca_params['crop_box'][:, 2]/image_size)).mean().item()
     # build camera
     screen_size = torch.tensor([image_size, image_size]).float().repeat(batch_size, 1).to(device)
     initial_focal_length = torch.tensor([[5000.0 / image_size]]).to(device)
