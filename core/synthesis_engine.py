@@ -37,7 +37,7 @@ class Synthesis_Engine:
         }
         return cameras_kwargs
 
-    def optimize_texture(self, batch_data, steps=160):
+    def optimize_texture(self, batch_data, steps=100):
         # ['frame_names', 'frames', 'lightning', 'shape_code']
         batch_size = len(batch_data['frame_names'])
         batch_data['lightning']['flame_pose'][..., :3] *= 0
@@ -57,7 +57,7 @@ class Synthesis_Engine:
         # optimize
         texture_params = torch.nn.Parameter(torch.rand(1, 140).to(self._device))
         params = [
-            {'params': [texture_params], 'lr': 0.1, 'name': ['tex']},
+            {'params': [texture_params], 'lr': 0.05, 'name': ['tex']},
         ]
         optimizer = torch.optim.Adam(params)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=steps, gamma=0.5)
@@ -67,7 +67,9 @@ class Synthesis_Engine:
             pred_images, masks_all, masks_face = self.mesh_render(flame_verts, albedos, cameras)
             loss_head = pixel_loss(pred_images, batch_data['frames'], mask=masks_all)
             loss_face = pixel_loss(pred_images, batch_data['frames'], mask=masks_face)
-            all_loss = (loss_head + loss_face) * 350
+            loss_norm = torch.sum(texture_params ** 2)
+            all_loss = (loss_head + loss_face + loss_norm * 0.0001) * 350
+            # print(loss_head, loss_face, loss_norm * 0.0001)
             optimizer.zero_grad()
             all_loss.backward()
             optimizer.step()
