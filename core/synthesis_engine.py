@@ -68,7 +68,7 @@ class Synthesis_Engine:
             loss_head = pixel_loss(pred_images, batch_data['frames'], mask=masks_all)
             loss_face = pixel_loss(pred_images, batch_data['frames'], mask=masks_face)
             loss_norm = torch.sum(texture_params ** 2)
-            all_loss = (loss_head + loss_face + loss_norm * 0.0001) * 350
+            all_loss = (loss_head + loss_face + loss_norm * 0.0005) * 350
             # print(loss_head, loss_face, loss_norm * 0.0001)
             optimizer.zero_grad()
             all_loss.backward()
@@ -89,7 +89,7 @@ class Synthesis_Engine:
         rotation, translation = transform_matrix[:, :3, :3], transform_matrix[..., :3, 3]
         translation = torch.nn.Parameter(translation)
         rotation = torch.nn.Parameter(matrix_to_rotation_6d(rotation))
-        texture_params = torch.nn.Parameter(batch_data['texture_code'])
+        texture_params = torch.nn.Parameter(batch_data['texture_code'], requires_grad=False)
         expression_codes = torch.nn.Parameter(batch_data['lightning']['expression'])
         params = [
             # {'params': [texture_params], 'lr': 0.005, 'name': ['tex']},
@@ -119,6 +119,8 @@ class Synthesis_Engine:
             pred_images, mask_all, mask_face = self.mesh_render(flame_verts, albedos, cameras)
             loss_face = pixel_loss(pred_images, batch_data['frames'], mask=mask_face)
             loss_head = pixel_loss(pred_images, batch_data['frames'], mask=mask_all)
+            # loss_norm = torch.sum(texture_params ** 2)
+            # all_loss = (loss_head + loss_face + loss_norm * 0.0001) * 350
             all_loss = (loss_face + loss_head) * 350
             # lmks
             points_68 = cameras.transform_points_screen(pred_lmk_68, R=rotation_6d_to_matrix(rotation), T=translation)[..., :2]
