@@ -63,7 +63,8 @@ class Render_Engine(torch.nn.Module):
         flame_verts = flame_verts * self.flame_scale
         pred_lmk_68, pred_lmk_dense = pred_lmk_68 * self.flame_scale, pred_lmk_dense * self.flame_scale
         # render
-        points_image = self.point_render(torch.cat([pred_lmk_68, pred_lmk_dense], dim=1))
+        # points_image = self.point_render(torch.cat([pred_lmk_68, pred_lmk_dense], dim=1))
+        points_image = self.point_render(flame_verts)
         if self._with_texture:
             if not hasattr(self, 'albedos'):
                 self.albedos = self.flame_texture(batch_data['texture_code'])
@@ -83,6 +84,6 @@ class Render_Engine(torch.nn.Module):
             vis_i = torchvision.utils.draw_keypoints(vis_i.to(torch.uint8), points_dense[idx:idx+1], colors="red", radius=1.5)
             vis_i = torchvision.utils.draw_keypoints(vis_i.to(torch.uint8), points_68[idx:idx+1], colors="blue", radius=1.5)
             vis_i = torchvision.utils.draw_bounding_boxes(vis_i, batch_data[anno_key]['bbox'][idx:idx+1])
-            vis_image = torchvision.utils.make_grid([frame.cpu(), images[idx].cpu(), points_image[idx].cpu(), vis_i.cpu()], nrow=4)
+            vis_image = torchvision.utils.make_grid([frame.cpu(), images[idx].cpu(), vis_i.cpu(), points_image[idx].cpu()], nrow=4)
             vis_images.append(vis_image)
         return vis_images
