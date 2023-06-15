@@ -6,7 +6,7 @@ import shutil
 import argparse
 sys.path.append('./')
 
-def build_dataset_pth(data_path, val_length=5, test_length=1000):
+def build_dataset_pth(data_path, val_length=20, test_length=1000):
     # dir_path = os.path.dirname(data_path)
     original_dict = torch.load(data_path, map_location='cpu')
     all_keys = list(original_dict.keys())
