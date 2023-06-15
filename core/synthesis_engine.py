@@ -68,7 +68,7 @@ class Synthesis_Engine:
             loss_head = pixel_loss(pred_images, batch_data['frames'], mask=masks_all)
             loss_face = pixel_loss(pred_images, batch_data['frames'], mask=masks_face)
             loss_norm = torch.sum(texture_params ** 2)
-            all_loss = (loss_head + loss_face + loss_norm * 0.0005) * 350
+            all_loss = (loss_head + loss_face + loss_norm * 2e-5) * 350
             # print(loss_head, loss_face, loss_norm * 0.0001)
             optimizer.zero_grad()
             all_loss.backward()
@@ -76,7 +76,7 @@ class Synthesis_Engine:
             scheduler.step()
             tqdm_queue.set_description(f'Loss(Texture): {all_loss.item():.4f}')
         results = {'texture_params': texture_params.detach().cpu()}
-        return results, torch.cat([batch_data['frames'][:4], pred_images[:4]]).cpu()
+        return results, torch.cat([batch_data['frames'][:4], pred_images[:4].clamp(0, 1)]).cpu()
 
     def synthesis_optimize(self, batch_data, steps=30):
         # ['frame_names', 'frames', 'lightning', 'landmarks', 'texture_code', 'shape_code']
@@ -125,8 +125,8 @@ class Synthesis_Engine:
             # lmks
             points_68 = cameras.transform_points_screen(pred_lmk_68, R=rotation_6d_to_matrix(rotation), T=translation)[..., :2]
             points_dense = cameras.transform_points_screen(pred_lmk_dense, R=rotation_6d_to_matrix(rotation), T=translation)[..., :2]
-            loss_lmk_68 = lmk_loss(points_68, batch_data['lmks']['lmks'], self.image_size)
-            loss_lmk_dense = lmk_loss(points_dense, batch_data['lmks']['lmks_dense'][:, self.flame_model.mediapipe_idx], self.image_size)
+            loss_lmk_68 = lmk_loss(points_68, batch_data['emoca']['lmks'], self.image_size)
+            loss_lmk_dense = lmk_loss(points_dense, batch_data['emoca']['lmks_dense'][:, self.flame_model.mediapipe_idx], self.image_size)
             all_loss = all_loss + (loss_lmk_68 + loss_lmk_dense) * 300
 
             optimizer.zero_grad()
@@ -148,7 +148,7 @@ class Synthesis_Engine:
         
         for idx, name in enumerate(batch_data['frame_names']):
             synthesis_results[name] = {
-                'bbox': batch_data['lightning']['bbox'][idx].half().cpu(),
+                'face_box': batch_data['lightning']['face_box'][idx].half().cpu(),
                 'flame_pose': batch_data['lightning']['flame_pose'][idx].half().cpu(),
                 'expression': expression_codes[idx].half().cpu(),
                 'transform_matrix': transform_matrix[idx].half().cpu()

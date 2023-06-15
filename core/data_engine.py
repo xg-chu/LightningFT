@@ -7,20 +7,25 @@ import numpy as np
 import torchvision
 from tqdm.rich import tqdm
 
+from model.SGHM import HumanMatting
 from utils.utils import pretty_dict
 
+SGHM_CKPT_PATH = './assets/SGHM/SGHM-ResNet50.pth'
+
 class DataEngine:
-    def __init__(self, path_dict):
+    def __init__(self, path_dict, device='cpu'):
+        self.device = device
         self.path_dict = path_dict
         self.path_dict['dataset_path'] = os.path.join(path_dict['output_path'], 'lmdb')
-        self.path_dict['lmks_path'] = os.path.join(path_dict['output_path'], 'landmarks.pth')
-        self.path_dict['emoca_path'] = os.path.join(path_dict['output_path'], 'emoca_v2.pth')
+        # self.path_dict['lmks_path'] = os.path.join(path_dict['output_path'], 'landmarks.pth')
+        self.path_dict['emoca_path'] = os.path.join(path_dict['output_path'], 'emoca.pth')
         self.path_dict['camera_path'] = os.path.join(path_dict['output_path'], 'camera_params.pth')
         self.path_dict['lightning_path'] = os.path.join(path_dict['output_path'], 'lightning.pth')
         self.path_dict['texture_path'] = os.path.join(path_dict['output_path'], 'texture.pth')
         self.path_dict['synthesis_path'] = os.path.join(path_dict['output_path'], 'synthesis.pth')
         self.path_dict['smoothed_path'] = os.path.join(path_dict['output_path'], 'smoothed.pth')
         self.path_dict['visul_path'] = os.path.join(path_dict['output_path'], 'track.mp4')
+        self.path_dict['visul_data_path'] = os.path.join(path_dict['output_path'], 'data_vis.mp4')
         self.path_dict['visul_calib_path'] = os.path.join(path_dict['output_path'], 'calibration.jpg')
         self.path_dict['visul_texture_path'] = os.path.join(path_dict['output_path'], 'texture.jpg')
 
@@ -89,8 +94,9 @@ class DataEngine:
         elif '.jpg' in self.path_dict[path_key]:
             torchvision.utils.save_image(data, self.path_dict[path_key], nrow=4)
 
-    def build_data_lmdb(self, ):
+    def build_data_lmdb(self, matting_thresh):
         if not os.path.exists(self.path_dict['dataset_path']):
+            self.matting_engine = RobustMattingEngine(device=self.device)
             print('Decoding video.....')
             video = torchvision.io.VideoReader(self.path_dict['video_path'], 'video')
             meta_data = video.get_metadata()
@@ -100,10 +106,20 @@ class DataEngine:
             env = lmdb.open(self.path_dict['dataset_path'], map_size=1099511627776) # Maximum 1T
             txn = env.begin(write=True)
             counter = 0
+            visulization, writed = [], False
             for f_idx, frame in enumerate(tqdm(video, ncols=80, colour='#95bb72', total=approx_len)):
                 frame = frame['data']
+                frame = self.matting_engine.matting(frame, thresh=matting_thresh)
                 frame = torchvision.transforms.functional.resize(frame, size=512, antialias=True)
                 frame = torchvision.transforms.functional.center_crop(frame, output_size=512).float()
+                if f_idx % 3 == 0 and len(visulization) < 100:
+                    visulization.append(frame.cpu())
+                elif len(visulization) >= 300 and not writed:
+                    visulization = torch.stack(visulization, dim=0).permute(0, 2, 3, 1)
+                    torchvision.io.write_video(
+                        self.path_dict['visul_data_path'], visulization, fps=10
+                    )
+                    writed = True
                 img_name = 'f_{:07d}.jpg'.format(f_idx)
                 img_encoded = torchvision.io.encode_jpeg(frame.to(torch.uint8))
                 img_encoded = b''.join(map(lambda x:int.to_bytes(x,1,'little'), img_encoded.numpy().tolist()))
@@ -132,11 +148,45 @@ class DataEngine:
         if not hasattr(self, '_frames'):
             frames = []
             all_keys = list(self._dataset_lmdb_txn.cursor().iternext(values=False))
-            print('Load data, length:{}.'.format(len(all_keys)))
             frames = [key.decode() for key in all_keys]
+            print('Load data, length:{}.'.format(len(frames)))
             frames.sort(key=lambda x:int(x[2:-4]))
             self._frames = frames
         return self._frames
+
+
+class RobustMattingEngine:
+    def __init__(self, device='cuda'):
+        self.device = device
+        mat_model = HumanMatting(backbone='resnet50').eval()
+        ckpt = torch.load(SGHM_CKPT_PATH, map_location='cpu')
+        new_ckpt = {}
+        for key in ckpt.keys():
+            new_ckpt[key[7:]] = ckpt[key] 
+        mat_model.load_state_dict(new_ckpt)
+        self.mat_model = mat_model.to(device)
+        print('Matting Model Build done.')
+        self.rec_frames = [None] * 4
+
+    @torch.no_grad()
+    def matting(self, frame, thresh=0.3, background=[255, 255, 255]):
+        infer_size = 1280
+        h, w = frame.shape[1], frame.shape[2]
+        if w >= h:
+            rh = infer_size
+            rw = int(w / h * infer_size)
+        else:
+            rw = infer_size
+            rh = int(h / w * infer_size)
+        rh = rh - rh % 64
+        rw = rw - rw % 64    
+        resized_frame = torchvision.transforms.functional.resize(frame, size=(rh, rw), antialias=True)
+        resized_frame = resized_frame[None]/255.0
+        matting_results = self.mat_model(resized_frame.to(self.device))
+        alpha = matting_results['alpha_os8']
+        alpha = torchvision.transforms.functional.resize(alpha, size=(h, w), antialias=True)[0, 0]
+        frame[:, alpha < thresh] = torch.tensor(background).to(torch.uint8)[:, None]
+        return frame
 
 
 def move_to(obj, dtype, device):
@@ -155,5 +205,5 @@ def move_to(obj, dtype, device):
     elif isinstance(obj, str) or isinstance(obj, float) or isinstance(obj, int):
         return obj
     else:
-        print(obj)
+        print(obj, type(obj))
         raise TypeError("Invalid type for move_to")

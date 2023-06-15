@@ -69,7 +69,7 @@ class Render_Engine(torch.nn.Module):
             if not hasattr(self, 'albedos'):
                 self.albedos = self.flame_texture(batch_data['texture_code'])
             images, alpha_images, _ = self.mesh_render(flame_verts, self.albedos, cameras)
-            images *= 255.0
+            images = (images * 255.0).clamp(0, 255)
         else:
             images, alpha_images = self.mesh_render(flame_verts, cameras)
         # gather
@@ -83,7 +83,7 @@ class Render_Engine(torch.nn.Module):
             vis_i[alpha_images[idx]>0.5] += (images[idx, alpha_images[idx]>0.5] * 0.7)
             vis_i = torchvision.utils.draw_keypoints(vis_i.to(torch.uint8), points_dense[idx:idx+1], colors="red", radius=1.5)
             vis_i = torchvision.utils.draw_keypoints(vis_i.to(torch.uint8), points_68[idx:idx+1], colors="blue", radius=1.5)
-            vis_i = torchvision.utils.draw_bounding_boxes(vis_i, batch_data[anno_key]['bbox'][idx:idx+1])
+            vis_i = torchvision.utils.draw_bounding_boxes(vis_i, batch_data[anno_key]['face_box'][idx:idx+1]*frame.shape[-1])
             vis_image = torchvision.utils.make_grid([frame.cpu(), images[idx].cpu(), vis_i.cpu(), points_image[idx].cpu()], nrow=4)
             vis_images.append(vis_image)
         return vis_images

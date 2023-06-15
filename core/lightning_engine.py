@@ -63,7 +63,7 @@ class Lightning_Engine:
         # build params
         cameras = PerspectiveCameras(**cameras_kwargs)
         rotation, translation = self.flame_to_camera(
-            cameras, flame_pose, pred_lmk_68, batch_data['lmks']['lmks']
+            cameras, flame_pose, pred_lmk_68, batch_data['emoca']['lmks']
         )
         translation = torch.nn.Parameter(translation)
         rotation = torch.nn.Parameter(matrix_to_rotation_6d(rotation))
@@ -74,8 +74,8 @@ class Lightning_Engine:
         for idx in range(steps):
             points_68 = cameras.transform_points_screen(pred_lmk_68, R=rotation_6d_to_matrix(rotation), T=translation)[..., :2]
             points_dense = cameras.transform_points_screen(pred_lmk_dense, R=rotation_6d_to_matrix(rotation), T=translation)[..., :2]
-            loss_lmk_68 = lmk_loss(points_68, batch_data['lmks']['lmks'], self.image_size)
-            loss_lmk_dense = lmk_loss(points_dense, batch_data['lmks']['lmks_dense'][:, self.flame_model.mediapipe_idx], self.image_size)
+            loss_lmk_68 = lmk_loss(points_68, batch_data['emoca']['lmks'], self.image_size)
+            loss_lmk_dense = lmk_loss(points_dense, batch_data['emoca']['lmks_dense'][:, self.flame_model.mediapipe_idx], self.image_size)
             all_loss = (loss_lmk_68 + loss_lmk_dense) * 65
             optimizer.zero_grad()
             all_loss.backward()
@@ -88,7 +88,7 @@ class Lightning_Engine:
             lightning_results[name] = {
                 'flame_pose': batch_data['emoca']['pose'][idx].half().cpu(),
                 'expression': batch_data['emoca']['exp'][idx].half().cpu(),
-                'bbox': batch_data['emoca']['crop_box'][idx].half().cpu(),
+                'face_box': batch_data['emoca']['face_box'][idx].half().cpu(),
                 'transform_matrix': transform_matrix[idx].half().cpu()
             }
         return lightning_results

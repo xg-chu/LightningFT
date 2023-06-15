@@ -9,8 +9,7 @@ from tqdm.rich import tqdm
 
 from .data_engine import DataEngine
 from .calibration import optimize_camera
-from .detection_engine import Detection_Engine
-from .emoca_engine import Emoca_V2_Engine
+from .emoca_engine import Emoca_Engine
 from .lightning_engine import Lightning_Engine
 from .synthesis_engine import Synthesis_Engine
 from .render_engine import Render_Engine
@@ -29,28 +28,23 @@ class TrackEngine:
             'data_name': os.path.splitext(os.path.basename(self._args_config.data))[0],
             'output_path': os.path.join('outputs', os.path.splitext(os.path.basename(self._args_config.data))[0]),
         }
-        self.data_engine = DataEngine(path_dict=path_dict)
-        self.data_engine.build_data_lmdb()
+        self.data_engine = DataEngine(path_dict=path_dict, device=self._device)
+        self.data_engine.build_data_lmdb(matting_thresh=self._args_config.matting_thresh)
         # lmks engine
-        self.lmks_engine = Detection_Engine(device=device, lazy_init=True)
-        self.emoca_engine = Emoca_V2_Engine(EMOCA_CKPT_PATH, device=device, lazy_init=True)
+        self.emoca_engine = Emoca_Engine(EMOCA_CKPT_PATH, device=device, lazy_init=True)
         self.lightning_engine = Lightning_Engine(FLAME_MODEL_PATH, device=device, lazy_init=True)
         self.synthesis_engine = Synthesis_Engine(FLAME_MODEL_PATH, device=device, lazy_init=True)
 
     def run(self, ):
-        # landmarks
-        if not self.data_engine.check_path('lmks_path'):
-            landmarks = self.run_landmarks()
-            self.data_engine.save(landmarks, 'lmks_path')
         # emoca
         if not self.data_engine.check_path('emoca_path'):
             emoca_results = self.run_emoca()
             self.data_engine.save(emoca_results, 'emoca_path')
         if not self.data_engine.check_path('camera_path'):
             cali_frames = random.choices(self.data_engine.frames(), k=32)
-            batch_data = self.data_engine.get_frames(cali_frames, keys=['emoca', 'lmks'], device=self._device)
+            batch_data = self.data_engine.get_frames(cali_frames, keys=['emoca'], device=self._device)
             camera_params, calibration_image = optimize_camera(
-                batch_data['emoca'], batch_data['lmks'], batch_data['frames'], device=self._device
+                batch_data['emoca'], batch_data['frames'], device=self._device
             )
             self.data_engine.save(camera_params, 'camera_path')
             self.data_engine.save(calibration_image/255.0, 'visul_calib_path')
@@ -75,30 +69,14 @@ class TrackEngine:
             render_images = self.render_video(anno_key='smoothed')
             self.data_engine.save(render_images, 'visul_path', fps=self._args_config.visualization_fps)
 
-    def run_landmarks(self, ):
-        all_landmarks = {}
-        print('Annotating landmarks...')
-        last_frame_name = None
-        for frame_name in tqdm(self.data_engine.frames(), ncols=120, colour='#95bb72'):
-            frame = self.data_engine.get_frame(frame_name)
-            landmarks = self.lmks_engine.process_face(frame) # please input unnorm image
-            if landmarks['lmks'] is None:
-                landmarks['lmks'] = all_landmarks[last_frame_name]['lmks']
-            if landmarks['lmks_dense'] is None:
-                landmarks['lmks_dense'] = all_landmarks[last_frame_name]['lmks_dense']
-            all_landmarks[frame_name] = landmarks
-            last_frame_name = frame_name
-        print('Done.')
-        return all_landmarks
-
     def run_emoca(self, ):
         shape_codes, emoca_results = [], {}
         print('EMOCA encoding...')
         # processing
         for frame_name in tqdm(self.data_engine.frames(), ncols=120, colour='#95bb72'):
             frame = self.data_engine.get_frame(frame_name).float().to(self._device)
-            landmarks = self.data_engine.get_data('lmks_path', query_name=frame_name, device=self._device)['lmks_dense']
-            emoca_res = self.emoca_engine.process_face(frame, landmarks) # please input unnorm image
+            # landmarks = self.data_engine.get_data('lmks_path', query_name=frame_name, device=self._device)['lmks_dense']
+            emoca_res = self.emoca_engine.process_face(frame) # please input unnorm image
             emoca_results[frame_name] = emoca_res
             shape_codes.append(emoca_res['shape'])
         shape_codes = torch.stack(shape_codes, dim=0).mean(dim=0)
@@ -113,7 +91,7 @@ class TrackEngine:
         mini_batchs = build_minibatch(self.data_engine.frames(), 128)
         print('Lightning tracking...')
         for batch_frames in tqdm(mini_batchs, ncols=120, colour='#95bb72'):
-            batch_data = self.data_engine.get_frames(batch_frames, keys=['emoca', 'lmks'], device=self._device)
+            batch_data = self.data_engine.get_frames(batch_frames, keys=['emoca'], device=self._device)
             batch_data['shape_code'] = self.data_engine.get_data('emoca_path', query_name='shape_code', device=self._device)
             lightning_res = self.lightning_engine.lightning_optimize(batch_data)
             lightning_results.update(lightning_res)
@@ -143,7 +121,7 @@ class TrackEngine:
         mini_batchs = build_minibatch(self.data_engine.frames(), 64)
         print('Synthesis tracking...')
         for batch_frames in tqdm(mini_batchs, ncols=120, colour='#95bb72'):
-            batch_data = self.data_engine.get_frames(batch_frames, keys=['lightning', 'lmks'], device=self._device)
+            batch_data = self.data_engine.get_frames(batch_frames, keys=['lightning', 'emoca'], device=self._device)
             batch_data['texture_code'] = tex_params['texture_params'].clone()
             batch_data['shape_code'] = self.data_engine.get_data('emoca_path', query_name='shape_code', device=self._device)
             synthesis_res = self.synthesis_engine.synthesis_optimize(batch_data)
@@ -171,35 +149,45 @@ class TrackEngine:
         print('Done.')
         return vis_images
 
-    def run_smoothing(self, anno_key='synthesis', type='kalman'):
-        if type == 'kalman':
-            from pytorch3d.transforms import matrix_to_rotation_6d, rotation_6d_to_matrix
-            def smooth_params(params):
+    def run_smoothing(self, anno_key='synthesis', type='exponential'):
+        from pytorch3d.transforms import matrix_to_rotation_6d, rotation_6d_to_matrix
+        def smooth_params(data, alpha=0.5, type=type):
+            if type == 'kalman':
                 from pykalman import KalmanFilter
-                kf = KalmanFilter(initial_state_mean=params[0], n_dim_obs=params.shape[-1])
-                smoothed_params = kf.em(params).smooth(params)[0]
-                return smoothed_params
-            print('Running Kalman Smoother...')
-            smoothed_results = {}
-            bboxes, quaternions, translations = [], [], []
-            for frame_name in self.data_engine.frames():
-                smoothed_results[frame_name] = self.data_engine.get_data(anno_key+'_path', query_name=frame_name)
-                transform_matrix = smoothed_results[frame_name]['transform_matrix'].detach()
-                bboxes.append(smoothed_results[frame_name]['bbox'].numpy())
-                quaternions.append(matrix_to_rotation_6d(transform_matrix[:3, :3]).numpy())
-                translations.append(transform_matrix[:3, 3].numpy())
-            bboxes = smooth_params(np.array(bboxes))
-            quaternions = smooth_params(np.array(quaternions))
-            # quaternions = smooth_params(np.array(quaternions))
-            translations = smooth_params(np.array(translations))
-            # translations = smooth_params(np.array(translations))
-            for idx, frame_name in enumerate(self.data_engine.frames()):
-                smoothed_results[frame_name]['bbox'] = torch.tensor(bboxes[idx])
-                rotation = rotation_6d_to_matrix(torch.tensor(quaternions[idx]))
-                affine_matrix = torch.cat([rotation, torch.tensor(translations[idx])[:, None]], dim=-1).half().cpu()
-                smoothed_results[frame_name]['transform_matrix'] = affine_matrix
-            smoothed_results['meta_info'] = self.data_engine.get_data(anno_key+'_path', query_name='meta_info')
-            print('Done')
+                kf = KalmanFilter(initial_state_mean=data[0], n_dim_obs=data.shape[-1])
+                smoothed_data = kf.em(data).smooth(data)[0]
+                return smoothed_data
+            else:
+                smoothed_data = [data[0]]  # Initialize the smoothed data with the first value of the input data
+                for i in range(1, len(data)):
+                    smoothed_value = alpha * data[i] + (1 - alpha) * smoothed_data[i-1]
+                    smoothed_data.append(smoothed_value)
+                return smoothed_data
+        print('Running Kalman Smoother...')
+        smoothed_results = {}
+        bboxes, quaternions, translations, expression, flame_pose = [], [], [], [], []
+        for frame_name in self.data_engine.frames():
+            smoothed_results[frame_name] = self.data_engine.get_data(anno_key+'_path', query_name=frame_name)
+            transform_matrix = smoothed_results[frame_name]['transform_matrix'].detach()
+            bboxes.append(smoothed_results[frame_name]['face_box'].numpy())
+            quaternions.append(matrix_to_rotation_6d(transform_matrix[:3, :3]).numpy())
+            translations.append(transform_matrix[:3, 3].numpy())
+            flame_pose.append(smoothed_results[frame_name]['flame_pose'].numpy())
+            expression.append(smoothed_results[frame_name]['expression'].detach().numpy())
+        bboxes = smooth_params(np.array(bboxes), alpha=0.5)
+        quaternions = smooth_params(np.array(quaternions), alpha=0.5)
+        translations = smooth_params(np.array(translations), alpha=0.5)
+        flame_pose = smooth_params(np.array(flame_pose), alpha=0.9)
+        expression = smooth_params(np.array(expression), alpha=0.9)
+        for idx, frame_name in enumerate(self.data_engine.frames()):
+            smoothed_results[frame_name]['face_box'] = torch.tensor(bboxes[idx])
+            smoothed_results[frame_name]['flame_pose'] = torch.tensor(flame_pose[idx])
+            smoothed_results[frame_name]['expression'] = torch.tensor(expression[idx])
+            rotation = rotation_6d_to_matrix(torch.tensor(quaternions[idx]))
+            affine_matrix = torch.cat([rotation, torch.tensor(translations[idx])[:, None]], dim=-1).half().cpu()
+            smoothed_results[frame_name]['transform_matrix'] = affine_matrix
+        smoothed_results['meta_info'] = self.data_engine.get_data(anno_key+'_path', query_name='meta_info')
+        print('Done')
         return smoothed_results
 
 

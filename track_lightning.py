@@ -30,6 +30,7 @@ if __name__ == "__main__":
     parser.add_argument('--visualization', '-v', action='store_true')
     parser.add_argument('--visualization_fps', default=24, type=int)
     parser.add_argument('--remove_buffer', '-r', action='store_true')
+    parser.add_argument('--matting_thresh', '-m', default=0.5, type=float)
     args = parser.parse_args()
     ### SET DEVICE
     target_device = set_devices(args.device)

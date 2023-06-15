@@ -39,7 +39,7 @@ def get_length(key_list, val_length, test_length):
         max_frame_idx = max(max_frame_idx, int(frame_key[2:].split('.')[0]))
     total_length = max_frame_idx + 1
     # split dataset
-    random.seed(42)
+    random.seed(41)
     train_keys, test_keys = [], []
     for frame_key in key_list:
         frame_idx = int(frame_key[2:].split('.')[0])
@@ -47,21 +47,13 @@ def get_length(key_list, val_length, test_length):
             train_keys.append(frame_key)
         else:
             test_keys.append(frame_key)
-    val_keys = random.choices(key_list, k=val_length)
+    val_keys = random.choices(test_keys, k=val_length)
     return total_length, train_keys, val_keys, test_keys
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', default='')
-    parser.add_argument('--add_bg', default='')
     args = parser.parse_args()
     dataset_dict = build_dataset_pth(args.data)
-    if len(args.add_bg):
-        ext_name = os.path.basename(args.add_bg).split(".")[-1]
-        shutil.copyfile(args.add_bg, os.path.join(os.path.dirname(args.data), f'background.{ext_name}'))
-        dataset_dict['train']['meta_info']['background'] = f'background.{ext_name}'
-        dataset_dict['val']['meta_info']['background'] = f'background.{ext_name}'
-        dataset_dict['test']['meta_info']['background'] = f'background.{ext_name}'
     torch.save(dataset_dict, os.path.join(os.path.dirname(args.data), 'dataset.pth'))
-
