@@ -26,7 +26,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", '-d', default='cpu')
     parser.add_argument('--synthesis', action='store_true')
     parser.add_argument('--no_smooth', action='store_true')
-    parser.add_argument('--smooth_type', default='kalman')
+    parser.add_argument('--smooth_type', default='exponential')
     parser.add_argument('--visualization', '-v', action='store_true')
     parser.add_argument('--visualization_fps', default=24, type=int)
     parser.add_argument('--remove_buffer', '-r', action='store_true')
