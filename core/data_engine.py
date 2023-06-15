@@ -114,7 +114,7 @@ class DataEngine:
                 frame = torchvision.transforms.functional.center_crop(frame, output_size=512).float()
                 if f_idx % 3 == 0 and len(visulization) < 100:
                     visulization.append(frame.cpu())
-                elif len(visulization) >= 300 and not writed:
+                elif len(visulization) >= 100 and not writed:
                     visulization = torch.stack(visulization, dim=0).permute(0, 2, 3, 1)
                     torchvision.io.write_video(
                         self.path_dict['visul_data_path'], visulization, fps=10
